@@ -1,0 +1,101 @@
+@page "/login"
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject WalkieTalkie.Services.DbAuthenticationStateProvider DbAuthStateProvider
+
+<PageTitleHeading Title="Login" HeadingLevel="2" />
+
+<form @onsubmit="OnSubmit" @onsubmit:preventDefault="true" style="max-width:320px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <input @bind="_name" placeholder="Name" />
+        <input @bind="_pin" placeholder="PIN (4-6 digits)" inputmode="numeric" maxlength="6" />
+        <button type="submit" disabled="@_isSubmitting">@(_isSubmitting ? "Logging in..." : "Login")</button>
+        @if (_showInvalidCredentials)
+        {
+            <div style="color:#b00020">Invalid name or PIN.</div>
+        }
+        else if (_showAlreadyLoggedIn)
+        {
+            <div style="color:#b00020">This player is already logged in on another session.</div>
+        }
+        else if (!string.IsNullOrWhiteSpace(_errorMessage))
+        {
+            <div style="color:#b00020">@_errorMessage</div>
+        }
+    </div>
+</form>
+
+@code {
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    [SupplyParameterFromQuery(Name = "error")]
+    private string? Error { get; set; }
+
+    private bool _showInvalidCredentials;
+    private bool _showAlreadyLoggedIn;
+    private bool _isSubmitting;
+    private string _errorMessage = "";
+    private string _name = "";
+    private string _pin = "";
+
+    protected override void OnParametersSet()
+    {
+        _showInvalidCredentials = string.Equals(Error, "1", StringComparison.Ordinal);
+        _showAlreadyLoggedIn = string.Equals(Error, "2", StringComparison.Ordinal);
+    }
+
+    private async Task OnSubmit()
+    {
+        _showInvalidCredentials = false;
+        _showAlreadyLoggedIn = false;
+        _errorMessage = "";
+        _isSubmitting = true;
+
+        try
+        {
+            var (success, alreadyLoggedIn, invalidCredentials, error) = await DbAuthStateProvider.TryLoginAsync(_name, _pin);
+            if (!success)
+            {
+                _showInvalidCredentials = invalidCredentials;
+                _showAlreadyLoggedIn = alreadyLoggedIn;
+                _errorMessage = !invalidCredentials && !alreadyLoggedIn
+                    ? (string.IsNullOrWhiteSpace(error) ? "Login failed." : error)
+                    : "";
+                return;
+            }
+
+            var authState = await DbAuthStateProvider.GetAuthenticationStateAsync();
+            var isAdmin = authState.User.IsInRole("Admin");
+
+            if (isAdmin)
+            {
+                Nav.NavigateTo("/admin");
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(ReturnUrl)
+                && Uri.IsWellFormedUriString(ReturnUrl, UriKind.Relative)
+                && !IsAdminRoute(ReturnUrl))
+            {
+                Nav.NavigateTo(ReturnUrl);
+                return;
+            }
+
+            Nav.NavigateTo("/player");
+        }
+        finally
+        {
+            _isSubmitting = false;
+        }
+    }
+
+    private static bool IsAdminRoute(string returnUrl)
+    {
+        var path = (returnUrl ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        path = path.Split('?', '#')[0];
+        return path.Equals("/admin", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith("/admin/", StringComparison.OrdinalIgnoreCase);
+    }
+}

@@ -1,0 +1,67 @@
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+
+<PageTitle>@Title</PageTitle>
+
+@switch (HeadingLevel)
+{
+    case 1:
+        <h1 class="@CombinedClass" style="@HeadingStyle">@Title</h1>
+        break;
+    case 2:
+        <h2 class="@CombinedClass" style="@HeadingStyle">@Title</h2>
+        break;
+    case 3:
+        <h3 class="@CombinedClass" style="@HeadingStyle">@Title</h3>
+        break;
+    case 4:
+        <h4 class="@CombinedClass" style="@HeadingStyle">@Title</h4>
+        break;
+    default:
+        <h2 class="@CombinedClass" style="@HeadingStyle">@Title</h2>
+        break;
+}
+
+@code {
+    [Parameter]
+    public string Title { get; set; } = "";
+
+    [Parameter]
+    public int HeadingLevel { get; set; } = 2;
+
+    [Parameter]
+    public bool Rainbow { get; set; } = true;
+
+    [Parameter]
+    public bool Small { get; set; } = false;
+
+    [Parameter]
+    public string Style { get; set; } = "margin:0 0 6px 0;";
+
+    [Parameter]
+    public string CssClass { get; set; } = "";
+
+    private string HeadingClass
+    {
+        get
+        {
+            if (!Rainbow) return "";
+            return Small ? "rainbow-heading rainbow-heading--sm" : "rainbow-heading";
+        }
+    }
+
+    private string CombinedClass
+    {
+        get
+        {
+            var a = (HeadingClass ?? string.Empty).Trim();
+            var b = (CssClass ?? string.Empty).Trim();
+
+            if (string.IsNullOrWhiteSpace(a)) return b;
+            if (string.IsNullOrWhiteSpace(b)) return a;
+            return $"{a} {b}";
+        }
+    }
+
+    private string HeadingStyle => Style;
+}

@@ -1,0 +1,161 @@
+﻿@inherits LayoutComponentBase
+@inject AuthenticationStateProvider AuthStateProvider
+@inject WalkieTalkie.Services.AuthService Auth
+@inject WalkieTalkie.Services.DbAuthenticationStateProvider DbAuthStateProvider
+@inject Microsoft.JSInterop.IJSRuntime JSRuntime
+@inject NavigationManager Nav
+@implements IAsyncDisposable
+
+<CascadingAuthenticationState>
+    <div style="padding:12px 0;">
+        <div style="width:420px;max-width:calc(100vw - 24px);margin:0;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+            <h1 style="margin:0;font-weight:800;letter-spacing:0.5px;color:#6a1b9a;text-shadow:0 1px 0 rgba(0,0,0,0.15);">WalkieTalkie</h1>
+            @if (_isActuallyAuthenticated && !IsHomePage() && !IsLoginPage())
+            {
+                <button @onclick="OnLogout" style="min-width:120px;padding:6px 12px;border-radius:4px;border:1px solid #888;background:#f3f3f3;cursor:pointer;">Logout</button>
+            }
+            else
+            {
+                <!-- No logout button when not properly authenticated -->
+            }
+        </div>
+    </div>
+
+    <div style="width:420px;max-width:calc(100vw - 24px);margin:0;">
+        @Body
+    </div>
+</CascadingAuthenticationState>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">🗙</span>
+</div>
+
+@code {
+    private AuthenticationState? _authState;
+    private System.Timers.Timer? _authRefreshTimer;
+    private bool _isActuallyAuthenticated = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+
+        // Initial authentication state check
+        await RefreshAuthenticationState();
+        
+        // Set up a timer to periodically refresh authentication state
+        _authRefreshTimer = new System.Timers.Timer(3000); // Check every 3 seconds
+        _authRefreshTimer.Elapsed += async (sender, e) => await RefreshAuthenticationState();
+        _authRefreshTimer.Start();
+    }
+
+    private async void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        await RefreshAuthenticationState();
+    }
+
+    private bool IsLoginPage()
+    {
+        try
+        {
+            var relative = Nav.ToBaseRelativePath(Nav.Uri);
+            var path = relative.Split('?', '#')[0].Trim('/');
+            return string.Equals(path, "login", StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private bool IsHomePage()
+    {
+        try
+        {
+            var relative = Nav.ToBaseRelativePath(Nav.Uri);
+            if (string.IsNullOrEmpty(relative)) return true;
+            var path = relative.Split('?', '#')[0].Trim('/');
+            return string.IsNullOrEmpty(path);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private async Task RefreshAuthenticationState()
+    {
+        try
+        {
+            var newAuthState = await AuthStateProvider.GetAuthenticationStateAsync();
+            
+            // Only update if the state actually changed to avoid unnecessary re-renders
+            var oldIsAuthenticated = await IsActuallyAuthenticatedWithState(_authState);
+            var newIsAuthenticated = await IsActuallyAuthenticatedWithState(newAuthState);
+            
+            if (oldIsAuthenticated != newIsAuthenticated)
+            {
+                _authState = newAuthState;
+                _isActuallyAuthenticated = newIsAuthenticated;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AuthDebug] Error checking auth state: {ex.Message}");
+            // If there's an error getting auth state, assume not authenticated
+            if (_authState != null || _isActuallyAuthenticated)
+            {
+                _authState = null;
+                _isActuallyAuthenticated = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private async Task OnLogout()
+    {
+        try
+        {
+            await DbAuthStateProvider.SignOutAsync();
+        }
+        catch
+        {
+        }
+
+        Nav.NavigateTo("/login");
+    }
+
+    private async Task<bool> IsActuallyAuthenticatedWithState(AuthenticationState? authState)
+    {
+        try
+        {
+            var isAuthenticated = authState?.User?.Identity?.IsAuthenticated ?? false;
+            if (!isAuthenticated) return false;
+
+            var uid = authState?.User?.FindFirst("uid")?.Value;
+            var name = authState?.User?.Identity?.Name;
+
+            if (string.IsNullOrWhiteSpace(uid) || string.IsNullOrWhiteSpace(name))
+            {
+                return false;
+            }
+
+            // DB context is authoritative for tab-scoped login status
+            var contextId = await JSRuntime.InvokeAsync<string>("WalkieTalkieAuth.getContextId");
+            return await Auth.IsContextValidAsync(contextId, touch: true);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+        _authRefreshTimer?.Stop();
+        _authRefreshTimer?.Dispose();
+    }
+}

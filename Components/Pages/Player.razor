@@ -1,0 +1,1165 @@
+@page "/player"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Player,Admin")]
+@implements IDisposable
+@using WalkieTalkie.Services
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthService Auth
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject SettingsService Settings
+@inject UsableMsVoiceService UsableMsVoices
+
+<PageTitleHeading Title="Player" HeadingLevel="2" />
+
+<p>You are logged in as <b>@_currentUserName</b>.</p>
+
+@if (_sessionExpiresAt.HasValue)
+{
+    <div style="margin-top:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;max-width:360px;">
+        <div style="font-size:13px;font-weight:bold;margin-bottom:4px;">Session Timeout</div>
+        <div style="font-size:14px;">
+            @if (_sessionTimeRemaining.TotalSeconds > 0)
+            {
+                <span>Time remaining: <b>@FormatTimeRemaining(_sessionTimeRemaining)</b></span>
+            }
+            else
+            {
+                <span style="color:#d32f2f;font-weight:bold;">Session expired - logging out...</span>
+            }
+        </div>
+    </div>
+}
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Member of Groups:</h4>
+
+@if (_userGroups?.Any() == true)
+{
+    <div style="max-width:360px;font-size:14px;margin-bottom:12px;">
+        @foreach (var g in _userGroups)
+        {
+            <div style="padding:4px 0;">• @g.Name</div>
+        }
+    </div>
+}
+else
+{
+    <div style="max-width:360px;font-size:12px;opacity:0.85;margin-bottom:12px;">
+        You are not a member of any groups.
+    </div>
+}
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Who else is logged in</h4>
+
+@if (_loggedInGroupMembers.Any())
+{
+    <div style="max-width:420px;font-size:14px;margin-bottom:12px;">
+        @foreach (var group in _loggedInGroupMembers.GroupBy(x => new { x.GroupId, x.GroupName }).OrderBy(x => x.Key.GroupName))
+        {
+            <div style="margin-bottom:8px;">
+                <div style="font-weight:bold;">@group.Key.GroupName (@group.Count() online)</div>
+                @foreach (var member in group.OrderBy(x => x.UserName))
+                {
+                    <div style="padding:2px 0 2px 12px;">• @member.UserName</div>
+                }
+            </div>
+        }
+    </div>
+}
+else if (_userGroups?.Any() == true)
+{
+    <div style="max-width:420px;font-size:12px;opacity:0.85;margin-bottom:12px;">
+        Nobody else in your groups is currently logged in.
+    </div>
+}
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Voice</h4>
+
+@if (_isPhoneClient)
+{
+    <div style="max-width:360px;font-size:12px;opacity:0.85;margin-top:-6px;margin-bottom:6px;">
+        Selected voice: Default voice
+    </div>
+}
+else if (!string.IsNullOrWhiteSpace(_selectedVoiceKey))
+{
+    <div style="max-width:360px;font-size:12px;opacity:0.85;margin-top:-6px;margin-bottom:6px;">
+        Selected voice: @_selectedVoiceDisplay
+    </div>
+}
+
+<div style="max-width:360px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        @if (_isPhoneClient)
+        {
+            <div style="font-size:12px;opacity:0.85;">Voice selection is unavailable on phone. Default voice will be used.</div>
+        }
+        else if (!_showVoiceSelection)
+        {
+            <button @onclick="ShowVoiceSelection" style="width:100%;">Change voice</button>
+        }
+        else
+        {
+            <button @onclick="LoadVoicesFromUserGesture" style="width:100%;">Load voices</button>
+            <select @key="_voicesLoaded" value="@_selectedLanguage" @onchange="OnLanguageChanged" disabled="@(!_voicesLoaded)">
+                <option value="">All languages</option>
+                @foreach (var l in _languages)
+                {
+                    <option @key="l" value="@l">@FormatLanguageLabel(l)</option>
+                }
+            </select>
+            <select @key="_selectedLanguage" value="@_selectedRegion" @onchange="OnRegionChanged" disabled="@(!_regions.Any())">
+                <option value="">All countries</option>
+                @foreach (var r in _regions)
+                {
+                    <option @key="r" value="@r">@FormatRegionLabel(_selectedLanguage, r)</option>
+                }
+            </select>
+            <select @key="@($"{_selectedLanguage}|{_selectedRegion}")" value="@_selectedVoiceKey" @onchange="OnVoiceChanged">
+                <option value="">Default voice</option>
+                @foreach (var v in _voices)
+                {
+                    <option @key="v.Key" value="@v.Key">@v.Label</option>
+                }
+            </select>
+        }
+        @if (!string.IsNullOrWhiteSpace(_voiceDebugStatus))
+        {
+            <div style="font-size:12px;opacity:0.85">@_voiceDebugStatus</div>
+        }
+        @if (!string.IsNullOrWhiteSpace(_voiceSaveMessage))
+        {
+            <div>@_voiceSaveMessage</div>
+        }
+    </div>
+</div>
+
+@* Show PIN change for regular users only if enabled, but always show for Admin users *@
+@if (_allowPlayerPinChange || _isAdminUser)
+{
+    <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">
+        @(_isAdminUser ? "Admin PIN Change" : "Change My PIN")
+        @if (!_allowPlayerPinChange && _isAdminUser)
+        {
+            <span style="font-size: 12px; color: #666;"> (Admin override - player PIN change is disabled)</span>
+        }
+    </h4>
+
+    <div style="max-width:360px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <input @bind="_currentPin" placeholder="Current PIN" inputmode="numeric" maxlength="6" />
+            <input @bind="_newPin" placeholder="New PIN (4-6 digits)" inputmode="numeric" maxlength="6" />
+            <button @onclick="OnChangePin">Change PIN</button>
+            @if (!string.IsNullOrWhiteSpace(_pinMessage))
+            {
+                <div>@_pinMessage</div>
+            }
+        </div>
+    </div>
+}
+else
+{
+    <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">PIN Change</h4>
+    <div style="max-width:360px; color: #666; font-style: italic;">
+        PIN change is currently disabled. Please contact an administrator if you need to change your PIN.
+    </div>
+}
+
+<LobbyChat CurrentUserId="@_cachedUserId" OtherUserOnline="@(_loggedInGroupMembers.Any())" />
+
+<script>
+  window.WalkieTalkieVoice = window.WalkieTalkieVoice || {};
+  window.WalkieTalkieVoice.version = 'player-voices-2026-03-09a';
+  window.WalkieTalkieVoice.ping = function () {
+    try {
+      return window.WalkieTalkieVoice.version || 'unknown';
+    } catch (e) {
+      return 'ping-error';
+    }
+  };
+  window.WalkieTalkieVoice.getVoicesCount = function () {
+    try {
+      var vs = window.WalkieTalkieVoice.getVoices();
+      return (vs && vs.length) ? vs.length : 0;
+    } catch (e) {
+      return -1;
+    }
+  };
+  window.WalkieTalkieVoice.isProbablyPhone = function () {
+    try {
+      var ua = (navigator && navigator.userAgent) ? navigator.userAgent : '';
+      ua = (ua || '').toLowerCase();
+      if (ua.indexOf('android') >= 0) return true;
+      if (ua.indexOf('iphone') >= 0) return true;
+      if (ua.indexOf('ipad') >= 0) return true;
+      if (ua.indexOf('ipod') >= 0) return true;
+      if (ua.indexOf('mobile') >= 0) return true;
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
+ </script>
+
+@code {
+    private string _currentPin = "";
+    private string _newPin = "";
+    private string _pinMessage = "";
+    private string _currentUserName = "";
+    private bool _allowPlayerPinChange = true;
+    private bool _isAdminUser = false;
+
+    // Session timeout tracking
+    private DateTimeOffset? _sessionExpiresAt = null;
+    private TimeSpan _sessionTimeRemaining = TimeSpan.Zero;
+    private System.Threading.Timer? _sessionTimer;
+
+    private sealed class VoiceOption
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+    }
+
+    private sealed class VoiceInfo
+    {
+        public string? VoiceURI { get; set; }
+        public string? Name { get; set; }
+        public string? Lang { get; set; }
+    }
+
+    private sealed class VoiceOptionInternal
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string Lang { get; set; } = "";
+    }
+
+    private List<VoiceOption> _voices = new();
+    private List<VoiceOptionInternal> _allVoices = new();
+    private List<string> _languages = new();
+    private List<string> _regions = new();
+    private string _selectedLanguage = "";
+    private string _selectedRegion = "";
+    private string _selectedVoiceKey = "";
+    private string _selectedVoiceDisplay = "";
+    private string _voiceSaveMessage = "";
+    private string _voiceLoadError = "";
+    private string _voiceDebugStatus = "";
+    private bool _voicesLoaded = false;
+    private bool _showVoiceSelection = true;
+    private bool _loadedVoicePrefs = false;
+    private bool _appliedVoiceDerivedDefaults = false;
+
+    private bool _isPhoneClient = false;
+
+    // Group selection
+    private List<WalkieTalkie.Data.Group>? _userGroups;
+    private List<AuthService.LoggedInGroupMemberDto> _loggedInGroupMembers = new();
+    private int? _cachedUserId = null;
+
+    private System.Threading.Timer? _membersRefreshTimer;
+
+    // Initialize group selection
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Handle voice initialization (from second method)
+        try
+        {
+            _isPhoneClient = await JS.InvokeAsync<bool>("WalkieTalkieVoice.isProbablyPhone");
+        }
+        catch
+        {
+            _isPhoneClient = false;
+        }
+
+        if (_isPhoneClient)
+        {
+            await ForceDefaultVoiceForPhoneClient();
+        }
+
+        var uid = GetCurrentUserId();
+        if (!uid.HasValue) return;
+
+        try
+        {
+            var preferred = await Auth.GetPreferredTtsVoiceAsync(uid.Value);
+            _selectedVoiceKey = preferred ?? "";
+            _selectedVoiceDisplay = _selectedVoiceKey;
+        }
+        catch (Exception ex)
+        {
+            _voiceLoadError = $"Voice load error: {ex.GetType().Name}: {ex.Message}";
+        }
+
+        try
+        {
+            var lang = await Auth.GetPreferredTtsLanguageAsync(uid.Value);
+            _selectedLanguage = (lang ?? string.Empty).Trim();
+        }
+        catch (Exception ex)
+        {
+            _voiceLoadError += $" | Language error: {ex.Message}";
+        }
+
+        try
+        {
+            var region = await Auth.GetPreferredTtsRegionAsync(uid.Value);
+            _selectedRegion = (region ?? string.Empty).Trim();
+        }
+        catch (Exception ex)
+        {
+            _voiceLoadError += $" | Region error: {ex.Message}";
+        }
+
+        if (_isPhoneClient)
+        {
+            _selectedVoiceKey = "";
+            _selectedVoiceDisplay = "Default voice";
+            _selectedLanguage = "";
+            _selectedRegion = "";
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedLanguage))
+        {
+            _selectedLanguage = "en";
+        }
+
+        if (string.IsNullOrWhiteSpace(_selectedRegion) && string.Equals(_selectedLanguage, "en", StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedRegion = "AU";
+        }
+
+        _showVoiceSelection = false;
+        _loadedVoicePrefs = true;
+
+        // Auto-load voices to populate dropdowns with saved selections
+        if (!_isPhoneClient)
+        {
+            try
+            {
+                await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+                await LoadVoicesAsync();
+            }
+            catch
+            {
+            }
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Dictionary<int, string> _userNames = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Cache user ID and username using AuthenticationStateProvider (works with SignalR)
+        await InvokeAsync(async () =>
+        {
+            var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+            var user = authState.User;
+            var raw = user?.FindFirst("uid")?.Value;
+            var userName = user?.Identity?.Name;
+
+            // Store username for display
+            _currentUserName = userName ?? "Unknown";
+
+            if (int.TryParse(raw, out var id))
+            {
+                _cachedUserId = id;
+            }
+            else
+            {
+                // Fallback: lookup by username
+                if (!string.IsNullOrWhiteSpace(userName))
+                {
+                    var appUser = await Auth.GetUserByNameAsync(userName);
+                    if (appUser != null) _cachedUserId = appUser.Id;
+                }
+            }
+            await InvokeAsync(StateHasChanged);
+        });
+
+        await InvokeAsync(async () =>
+        {
+            var users = await Auth.ListUsersAsync();
+            _userNames = users.ToDictionary(x => x.Id, x => x.Name ?? "");
+
+            // Load user groups
+            if (_cachedUserId.HasValue)
+            {
+                _userGroups = await Auth.GetUserGroupsAsync(_cachedUserId.Value);
+                await RefreshLoggedInGroupMembers();
+
+                // Force UI update after loading preferences
+                await InvokeAsync(StateHasChanged);
+            }
+
+            // Load PIN change permission setting
+            _allowPlayerPinChange = await Settings.GetAllowPlayerPinChangeAsync();
+
+            // Check if current user is Admin
+            await CheckIfUserIsAdmin();
+
+            await InvokeAsync(StateHasChanged);
+        });
+
+        _membersRefreshTimer = new System.Threading.Timer(async _ =>
+        {
+            try
+            {
+                await RefreshLoggedInGroupMembers();
+                _ = InvokeAsync(StateHasChanged);
+            }
+            catch
+            {
+            }
+        }, null, TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+
+        // Initialize session expiration tracking
+        await InitializeSessionTimeout();
+
+        // Start session countdown timer (update every second)
+        _sessionTimer = new System.Threading.Timer(async _ =>
+        {
+            try
+            {
+                await UpdateSessionCountdown();
+            }
+            catch
+            {
+            }
+        }, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+
+    private async Task ForceDefaultVoiceForPhoneClient()
+    {
+        _selectedVoiceKey = "";
+        _selectedVoiceDisplay = "Default voice";
+        _selectedLanguage = "";
+        _selectedRegion = "";
+        _showVoiceSelection = false;
+
+        var uid = GetCurrentUserId();
+        if (!uid.HasValue)
+        {
+            return;
+        }
+
+        try
+        {
+            var okVoice = await Auth.UpdatePreferredTtsVoiceAsync(uid.Value, null);
+            var okLanguage = okVoice && await Auth.UpdatePreferredTtsLanguageAsync(uid.Value, null);
+            var okRegion = okVoice && await Auth.UpdatePreferredTtsRegionAsync(uid.Value, null);
+            _voiceSaveMessage = (okVoice && okLanguage && okRegion) ? "Phone uses Default voice." : "Phone uses Default voice.";
+        }
+        catch
+        {
+            _voiceSaveMessage = "Phone uses Default voice.";
+        }
+    }
+
+    private async Task ShowVoiceSelection()
+    {
+        if (_isPhoneClient)
+        {
+            _showVoiceSelection = false;
+            _voiceSaveMessage = "Phone uses Default voice.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        _showVoiceSelection = true;
+        await InvokeAsync(StateHasChanged);
+
+        try
+        {
+            await LoadVoicesFromUserGesture();
+        }
+        catch
+        {
+        }
+    }
+
+    private async Task OnLanguageChanged(ChangeEventArgs e)
+    {
+        _selectedLanguage = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _selectedRegion = "";
+        _voiceDebugStatus = "Loading voices…";
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        try
+        {
+            var uid = GetCurrentUserId();
+            if (uid.HasValue)
+            {
+                await Auth.UpdatePreferredTtsLanguageAsync(uid.Value, _selectedLanguage);
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+        }
+        catch
+        {
+        }
+
+        await LoadVoicesAsync();
+    }
+
+    private async Task OnRegionChanged(ChangeEventArgs e)
+    {
+        _selectedRegion = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _voiceDebugStatus = "Loading voices…";
+        await InvokeAsync(StateHasChanged);
+        await Task.Yield();
+
+        try
+        {
+            var uid = GetCurrentUserId();
+            if (uid.HasValue)
+            {
+                await Auth.UpdatePreferredTtsRegionAsync(uid.Value, _selectedRegion);
+            }
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+        }
+        catch
+        {
+        }
+
+        await LoadVoicesAsync();
+    }
+
+    private static string FormatLanguageLabel(string language)
+    {
+        language = (language ?? string.Empty).Trim().ToLowerInvariant();
+        return language switch
+        {
+            "en" => "English (en)",
+            "fr" => "French (fr)",
+            "es" => "Spanish (es)",
+            "de" => "German (de)",
+            "it" => "Italian (it)",
+            "pt" => "Portuguese (pt)",
+            "nl" => "Dutch (nl)",
+            "sv" => "Swedish (sv)",
+            "da" => "Danish (da)",
+            "no" => "Norwegian (no)",
+            "fi" => "Finnish (fi)",
+            _ => language
+        };
+    }
+
+    private static string FormatRegionLabel(string? language, string region)
+    {
+        var lang = (language ?? string.Empty).Trim();
+        region = (region ?? string.Empty).Trim().ToUpperInvariant();
+        if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+        {
+            return region switch
+            {
+                "US" => "United States (en-US)",
+                "GB" => "United Kingdom (en-GB)",
+                "AU" => "Australia (en-AU)",
+                "CA" => "Canada (en-CA)",
+                "NZ" => "New Zealand (en-NZ)",
+                "IE" => "Ireland (en-IE)",
+                "IN" => "India (en-IN)",
+                "ZA" => "South Africa (en-ZA)",
+                _ => region
+            };
+        }
+
+        return string.IsNullOrWhiteSpace(lang)
+            ? region
+            : $"{region} ({lang}-{region})";
+    }
+
+    private async Task LoadVoicesFromUserGesture()
+    {
+        try
+        {
+            _voiceDebugStatus = "Loading voices…";
+            await InvokeAsync(StateHasChanged);
+            await Task.Yield();
+
+            try
+            {
+                await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+            }
+            catch (Exception exWarm)
+            {
+                var msg = exWarm.Message ?? string.Empty;
+                if (msg.Length > 140) msg = msg.Substring(0, 140);
+                _voiceDebugStatus = $"Warmup error — {exWarm.GetType().Name}: {msg}";
+                await InvokeAsync(StateHasChanged);
+            }
+
+            await LoadVoicesAsync();
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.Message ?? string.Empty;
+            if (msg.Length > 140) msg = msg.Substring(0, 140);
+            _voiceDebugStatus = $"Load voices failed — {ex.GetType().Name}: {msg}";
+        }
+
+        if (string.IsNullOrWhiteSpace(_voiceDebugStatus))
+        {
+            _voiceDebugStatus = "Load voices finished.";
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadVoicesAsync()
+    {
+        var ping = "(ping: n/a)";
+        var c0 = "c0:?";
+        var c1 = "c1:?";
+        var c2 = "c2:?";
+        var rawCount = 0;
+        try
+        {
+            using var pingCts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            ping = await JS.InvokeAsync<string>("WalkieTalkieVoice.ping", pingCts.Token);
+
+            try
+            {
+                using var c0Cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                var count0 = await JS.InvokeAsync<int>("WalkieTalkieVoice.getVoicesCount", c0Cts.Token);
+                c0 = $"c0:{count0}";
+            }
+            catch
+            {
+                c0 = "c0:err";
+            }
+        }
+        catch (Exception exPing)
+        {
+            ping = $"ping failed: {exPing.GetType().Name}";
+        }
+
+        _voiceDebugStatus = $"Loading voices… ({ping}) ({c0})";
+        await InvokeAsync(StateHasChanged);
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            try
+            {
+                using var c1Cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                var count1 = await JS.InvokeAsync<int>("WalkieTalkieVoice.getVoicesAsyncCount", c1Cts.Token);
+                c1 = $"c1:{count1}";
+            }
+            catch
+            {
+                c1 = "c1:err";
+            }
+
+            try
+            {
+                using var c2Cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                var count2 = await JS.InvokeAsync<int>("WalkieTalkieVoice.getVoicesCount", c2Cts.Token);
+                c2 = $"c2:{count2}";
+            }
+            catch
+            {
+                c2 = "c2:err";
+            }
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(16));
+            var raw = await JS.InvokeAsync<List<VoiceInfo>>("WalkieTalkieVoice.getVoicesAsync", cts.Token);
+            rawCount = raw?.Count ?? 0;
+            _allVoices = (raw ?? new List<VoiceInfo>())
+                .Select(v =>
+                {
+                    var voiceURI = (v?.VoiceURI ?? string.Empty).Trim();
+                    var name = (v?.Name ?? string.Empty).Trim();
+                    var lang = (v?.Lang ?? string.Empty).Trim();
+
+                    var key = !string.IsNullOrWhiteSpace(voiceURI)
+                        ? $"uri:{voiceURI}"
+                        : $"name:{name}|lang:{lang}";
+
+                    var label = string.IsNullOrWhiteSpace(lang)
+                        ? name
+                        : $"{name} ({lang})";
+
+                    return new VoiceOptionInternal { Key = key, Label = label, Lang = lang };
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Label))
+                .DistinctBy(x => x.Key)
+                .OrderBy(x => x.Label)
+                .ToList();
+
+            _voicesLoaded = _allVoices.Count > 0;
+
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(_selectedVoiceKey))
+                {
+                    var selected = _allVoices.FirstOrDefault(v => v.Key == _selectedVoiceKey);
+                    _selectedVoiceDisplay = selected?.Label ?? _selectedVoiceKey;
+                }
+                else
+                {
+                    _selectedVoiceDisplay = "";
+                }
+            }
+            catch
+            {
+                _selectedVoiceDisplay = _selectedVoiceKey;
+            }
+
+            if (!_appliedVoiceDerivedDefaults
+                && _voicesLoaded
+                && _loadedVoicePrefs
+                && !string.IsNullOrWhiteSpace(_selectedVoiceKey))
+            {
+                var saved = _allVoices.FirstOrDefault(v => v.Key == _selectedVoiceKey);
+                if (saved is not null)
+                {
+                    static string GetLanguage(string? lang)
+                    {
+                        if (string.IsNullOrWhiteSpace(lang)) return "";
+                        lang = lang.Trim();
+                        var sep = lang.IndexOf('-');
+                        if (sep < 0) sep = lang.IndexOf('_');
+                        if (sep < 0) return lang.ToLowerInvariant();
+                        if (sep <= 0) return "";
+                        return lang.Substring(0, sep).Trim().ToLowerInvariant();
+                    }
+
+                    static string GetRegion(string? lang)
+                    {
+                        if (string.IsNullOrWhiteSpace(lang)) return "";
+                        lang = lang.Trim();
+                        var sep = lang.IndexOf('-');
+                        if (sep < 0) sep = lang.IndexOf('_');
+                        if (sep < 0) return "";
+                        if (sep + 1 >= lang.Length) return "";
+                        return lang.Substring(sep + 1).Trim().ToUpperInvariant();
+                    }
+
+                    var derivedLang = GetLanguage(saved.Lang);
+                    var derivedRegion = GetRegion(saved.Lang);
+
+                    if (!string.IsNullOrWhiteSpace(derivedLang))
+                    {
+                        _selectedLanguage = derivedLang;
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(derivedRegion))
+                    {
+                        _selectedRegion = derivedRegion;
+                    }
+                }
+
+                _appliedVoiceDerivedDefaults = true;
+            }
+
+            ApplyVoiceFilters();
+
+            var langText = string.IsNullOrWhiteSpace(_selectedLanguage) ? "all" : _selectedLanguage;
+            var regionText = string.IsNullOrWhiteSpace(_selectedRegion) ? "all" : _selectedRegion;
+            _voiceDebugStatus = $"Voices: raw {rawCount}, {_allVoices.Count} total, {_voices.Count} shown ({langText}/{regionText}) ({sw.ElapsedMilliseconds}ms) ({ping}) ({c0}) ({c1}) ({c2})";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException ex)
+        {
+            _voiceDebugStatus = $"Voices: canceled after raw {rawCount} ({sw.ElapsedMilliseconds}ms) — {ex.GetType().Name} ({ping}) ({c0}) ({c1}) ({c2})";
+            await InvokeAsync(StateHasChanged);
+            _voices = new();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error loading voices: {ex}");
+            var msg = ex.Message ?? string.Empty;
+            if (msg.Length > 140) msg = msg.Substring(0, 140);
+            _voiceDebugStatus = $"Voices: error after raw {rawCount} ({sw.ElapsedMilliseconds}ms) — {ex.GetType().Name}: {msg} ({ping}) ({c0}) ({c1}) ({c2})";
+            await InvokeAsync(StateHasChanged);
+            _voices = new();
+        }
+    }
+
+    private void ApplyVoiceFilters()
+    {
+        static HashSet<string> KnownLanguages() => new(StringComparer.OrdinalIgnoreCase)
+        {
+            "en","fr","es","de","it","pt","nl","sv","da","no","fi"
+        };
+
+        static HashSet<string> KnownRegionsForLang(string? language)
+        {
+            if (!string.Equals(language, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "US","GB","AU","CA","NZ","IE","IN","ZA"
+            };
+        }
+
+        static string GetLanguage(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return lang.ToLowerInvariant();
+            if (sep <= 0) return "";
+            return lang.Substring(0, sep).Trim().ToLowerInvariant();
+        }
+
+        static string GetRegion(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return "";
+            if (sep + 1 >= lang.Length) return "";
+            return lang.Substring(sep + 1).Trim().ToUpperInvariant();
+        }
+
+        _languages = _allVoices
+            .Select(v => GetLanguage(v.Lang))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => KnownLanguages().Contains(x) ? 0 : 1)
+            .ThenBy(x => FormatLanguageLabel(x))
+            .ThenBy(x => x)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_selectedLanguage)
+            && !_languages.Contains(_selectedLanguage, StringComparer.OrdinalIgnoreCase))
+        {
+            _selectedLanguage = "";
+            _selectedRegion = "";
+        }
+
+        var langFiltered = string.IsNullOrWhiteSpace(_selectedLanguage)
+            ? _allVoices
+            : _allVoices.Where(v => string.Equals(GetLanguage(v.Lang), _selectedLanguage, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        _regions = langFiltered
+            .Select(v => GetRegion(v.Lang))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => KnownRegionsForLang(_selectedLanguage).Contains(x) ? 0 : 1)
+            .ThenBy(x => FormatRegionLabel(_selectedLanguage, x))
+            .ThenBy(x => x)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_selectedRegion)
+            && !_regions.Contains(_selectedRegion, StringComparer.OrdinalIgnoreCase))
+        {
+            _selectedRegion = "";
+        }
+
+        var filtered = string.IsNullOrWhiteSpace(_selectedRegion)
+            ? langFiltered
+            : langFiltered.Where(v => string.Equals(GetRegion(v.Lang), _selectedRegion, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        if (!string.IsNullOrWhiteSpace(_selectedVoiceKey)
+            && !filtered.Any(v => v.Key == _selectedVoiceKey))
+        {
+            var saved = _allVoices.FirstOrDefault(v => v.Key == _selectedVoiceKey);
+            if (saved is not null)
+            {
+                filtered.Insert(0, saved);
+            }
+        }
+
+        _voices = filtered
+            .Select(v => new VoiceOption { Key = v.Key, Label = v.Label })
+            .ToList();
+    }
+
+    private async Task OnVoiceChanged(ChangeEventArgs e)
+    {
+        _voiceSaveMessage = "";
+
+        _selectedVoiceKey = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _selectedVoiceDisplay = _selectedVoiceKey;
+
+        static string GetLanguage(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return lang.ToLowerInvariant();
+            if (sep <= 0) return "";
+            return lang.Substring(0, sep).Trim().ToLowerInvariant();
+        }
+
+        static string GetRegion(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return "";
+            if (sep + 1 >= lang.Length) return "";
+            return lang.Substring(sep + 1).Trim().ToUpperInvariant();
+        }
+
+        try
+        {
+            var selectedVoice = _allVoices.FirstOrDefault(v => v.Key == _selectedVoiceKey);
+            if (selectedVoice is not null)
+            {
+                var derivedLanguage = GetLanguage(selectedVoice.Lang);
+                var derivedRegion = GetRegion(selectedVoice.Lang);
+
+                if (!string.IsNullOrWhiteSpace(derivedLanguage))
+                {
+                    _selectedLanguage = derivedLanguage;
+                }
+
+                _selectedRegion = derivedRegion;
+            }
+        }
+        catch
+        {
+        }
+
+        var uid = GetCurrentUserId();
+        if (!uid.HasValue)
+        {
+            _voiceSaveMessage = "Not logged in.";
+            return;
+        }
+
+        try
+        {
+            var ok = await Auth.UpdatePreferredTtsVoiceAsync(uid.Value, _selectedVoiceKey);
+            var okLanguage = ok && await Auth.UpdatePreferredTtsLanguageAsync(uid.Value, _selectedLanguage);
+            var okRegion = ok && await Auth.UpdatePreferredTtsRegionAsync(uid.Value, _selectedRegion);
+            _voiceSaveMessage = (ok && okLanguage && okRegion) ? "Saved." : "Save failed.";
+
+            if (ok && okLanguage && okRegion)
+            {
+                _showVoiceSelection = false;
+
+                try
+                {
+                    var selected = _allVoices.FirstOrDefault(v => v.Key == _selectedVoiceKey);
+                    _selectedVoiceDisplay = selected?.Label ?? _selectedVoiceKey;
+                }
+                catch
+                {
+                    _selectedVoiceDisplay = _selectedVoiceKey;
+                }
+            }
+        }
+        catch
+        {
+            _voiceSaveMessage = "Save failed.";
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task InitializeSessionTimeout()
+    {
+        try
+        {
+            var maxLoginHrs = await Settings.GetMaxLoginHrsAsync();
+            _sessionExpiresAt = DateTimeOffset.UtcNow.AddHours(maxLoginHrs);
+
+            await UpdateSessionCountdown();
+        }
+        catch
+        {
+            _sessionExpiresAt = null;
+        }
+    }
+
+    private async Task UpdateSessionCountdown()
+    {
+        if (!_sessionExpiresAt.HasValue)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        _sessionTimeRemaining = _sessionExpiresAt.Value - now;
+
+        if (_sessionTimeRemaining.TotalSeconds <= 0)
+        {
+            _sessionTimeRemaining = TimeSpan.Zero;
+            // Session expired - redirect to logout
+            await InvokeAsync(async () =>
+            {
+                try
+                {
+                    Nav.NavigateTo("/logout?reason=timeout", forceLoad: false);
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string FormatTimeRemaining(TimeSpan time)
+    {
+        if (time.TotalSeconds <= 0)
+        {
+            return "Expired";
+        }
+        else if (time.TotalHours >= 1)
+        {
+            return $"{(int)time.TotalHours}h {time.Minutes}m {time.Seconds}s";
+        }
+        else if (time.TotalMinutes >= 1)
+        {
+            return $"{time.Minutes}m {time.Seconds}s";
+        }
+        else
+        {
+            return $"{time.Seconds}s";
+        }
+    }
+
+    public void Dispose()
+    {
+        try
+        {
+            _membersRefreshTimer?.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _sessionTimer?.Dispose();
+        }
+        catch
+        {
+        }
+    }
+
+    private int? GetCurrentUserId()
+    {
+        if (_cachedUserId.HasValue) return _cachedUserId;
+
+        var name = _currentUserName;
+        System.Diagnostics.Debug.WriteLine($"GetCurrentUserId debug: Using cached username fallback: '{name}'");
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            try
+            {
+                var appUser = Auth.GetUserByNameAsync(name).GetAwaiter().GetResult();
+                if (appUser != null)
+                {
+                    _cachedUserId = appUser.Id;
+                    System.Diagnostics.Debug.WriteLine($"GetCurrentUserId debug: Username fallback successful, ID: {appUser.Id}");
+                    return appUser.Id;
+                }
+                else
+                {
+                    System.Diagnostics.Debug.WriteLine($"GetCurrentUserId debug: Username lookup failed - user '{name}' not found");
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"GetCurrentUserId debug: Username lookup error: {ex.Message}");
+            }
+        }
+
+        System.Diagnostics.Debug.WriteLine("GetCurrentUserId debug: All methods failed, returning null");
+        return null;
+    }
+
+    private async Task RefreshLoggedInGroupMembers()
+    {
+        if (!_cachedUserId.HasValue)
+        {
+            _loggedInGroupMembers = new List<AuthService.LoggedInGroupMemberDto>();
+            return;
+        }
+
+        try
+        {
+            _loggedInGroupMembers = await Auth.GetLoggedInUsersInUserGroupsAsync(_cachedUserId.Value);
+        }
+        catch
+        {
+            _loggedInGroupMembers = new List<AuthService.LoggedInGroupMemberDto>();
+        }
+    }
+
+    private async Task CheckIfUserIsAdmin()
+    {
+        try
+        {
+            var userId = GetCurrentUserId();
+            if (userId.HasValue)
+            {
+                // Get the user and check if they have Admin role
+                var users = await Auth.ListUsersAsync();
+                var currentUser = users.FirstOrDefault(u => u.Id == userId.Value);
+                if (currentUser != null)
+                {
+                    _isAdminUser = HasRole(currentUser, "Admin");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"CheckIfUserIsAdmin error: {ex.Message}");
+            _isAdminUser = false;
+        }
+    }
+
+    private static bool HasRole(WalkieTalkie.Data.AppUser user, string role)
+    {
+        var roles = (user.Roles ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return roles.Any(r => string.Equals(r, role, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private async Task OnChangePin()
+    {
+        _pinMessage = "";
+
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue)
+        {
+            _pinMessage = "No player id.";
+            return;
+        }
+
+        var ok = await Auth.ChangePinAsync(userId.Value, (_currentPin ?? "").Trim(), (_newPin ?? "").Trim());
+        _pinMessage = ok ? "PIN changed." : "Failed (check current PIN and new PIN format).";
+        if (ok)
+        {
+            _currentPin = "";
+            _newPin = "";
+        }
+    }
+}

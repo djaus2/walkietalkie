@@ -1,0 +1,24 @@
+@page "/logout"
+@inject WalkieTalkie.Services.DbAuthenticationStateProvider DbAuthStateProvider
+@inject NavigationManager Nav
+
+<p>Signing out...</p>
+
+@code {
+    [SupplyParameterFromQuery(Name = "reason")]
+    public string? Reason { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var isTimeout = string.Equals(Reason, "timeout", StringComparison.OrdinalIgnoreCase);
+            await DbAuthStateProvider.SignOutAsync(isTimeout);
+        }
+        catch
+        {
+        }
+
+        Nav.NavigateTo("/login", forceLoad: false);
+    }
+}

@@ -1,0 +1,840 @@
+@page "/admin"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using WalkieTalkie.Services
+@using WalkieTalkie.Data
+@inject AuthService Auth
+@inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject SettingsService Settings
+@inject UsableMsVoiceService UsableMsVoices
+@inject AppLogService AppLog
+
+<PageTitleHeading Title="Admin" HeadingLevel="2" />
+
+<p>You are logged in as <b>@_currentUserName</b>.</p>
+
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+    <button @onclick="ShowAdminTopSection" disabled="@(!_showSettingsSection)">Admin: Top</button>
+    <button @onclick="ShowAdminSettingsSection" disabled="@(_showSettingsSection)">Admin: Settings+</button>
+</div>
+
+@if (!_showSettingsSection)
+{
+    <div style="display:flex;flex-direction:column;gap:6px">
+        <a href="/admin/users">Manage players</a>
+        <a href="/admin/groups">Manage groups</a>
+        <a href="/player">Reset your password</a>
+        <button type="button" @onclick="OpenLogViewer" style="text-align:left;padding:0;border:none;background:none;color:blue;text-decoration:underline;cursor:pointer;">View activity logs</button>
+        <button type="button" @onclick="DownloadDatabaseBackup" style="text-align:left;padding:0;border:none;background:none;color:blue;text-decoration:underline;cursor:pointer;">Download database backup</button>
+        <button type="button" @onclick="ResetDatabase" style="text-align:left;padding:0;border:none;background:none;color:red;text-decoration:underline;cursor:pointer;">⚠️ Reset database (delete all data)</button>
+    </div>
+
+    <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Voices</h4>
+
+    <div style="max-width:520px">
+        <div style="display:flex;flex-direction:column;gap:8px">
+            <button @onclick="LoadAdminVoicesFromUserGesture" disabled="@_checkingChromeVoices">Load voices</button>
+            <select @key="_adminVoicesLoaded" value="@_adminSelectedLanguage" @onchange="OnAdminLanguageChanged" disabled="@(!_adminVoicesLoaded)">
+                <option value="">All languages</option>
+                @foreach (var l in _adminLanguages)
+                {
+                    <option @key="l" value="@l">@FormatLanguageLabel(l)</option>
+                }
+            </select>
+            <select @key="_adminSelectedLanguage" value="@_adminSelectedRegion" @onchange="OnAdminRegionChanged" disabled="@(!_adminRegions.Any())">
+                <option value="">All countries</option>
+                @foreach (var r in _adminRegions)
+                {
+                    <option @key="r" value="@r">@FormatRegionLabel(_adminSelectedLanguage, r)</option>
+                }
+            </select>
+            <select @key="@($"{_adminSelectedLanguage}|{_adminSelectedRegion}")" value="@_adminFocusedVoiceKey" @onchange="OnAdminFocusedVoiceChanged" disabled="@(!_adminFilteredVoices.Any())">
+                <option value="">Select a voice</option>
+                @foreach (var v in _adminFilteredVoices)
+                {
+                    <option @key="v.Key" value="@v.Key">@v.Label</option>
+                }
+            </select>
+            <div style="font-size:12px;opacity:0.85;">Loaded voices: @_adminAllVoices.Count. Allowed for players: @_adminSelectedVoiceTokens.Count.</div>
+            <div style="font-size:12px;opacity:0.85;">Raw browser voices: @_adminRawVoiceCount.@(_checkingChromeVoices ? " Loading…" : "")</div>
+            @if (_adminFilteredVoices.Any())
+            {
+                <div style="display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;border:1px solid #ddd;padding:8px;">
+                    @foreach (var voice in _adminFilteredVoices)
+                    {
+                        <label style="display:flex;align-items:flex-start;gap:8px;">
+                            <input type="checkbox" checked="@_adminSelectedVoiceTokens.Contains(voice.Token)" @onchange="@(e => OnAdminVoiceCheckedChanged(voice, e))" />
+                            <span>@voice.Label</span>
+                        </label>
+                    }
+                </div>
+            }
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button @onclick="SelectAllFilteredAdminVoices" disabled="@(!_adminFilteredVoices.Any())">Select filtered</button>
+                <button @onclick="ClearAllFilteredAdminVoices" disabled="@(!_adminFilteredVoices.Any())">Clear filtered</button>
+                <button @onclick="ToggleShowSelectedAdminVoices" disabled="@(!_adminSelectedVoiceTokens.Any())">@(_adminShowSelectedVoicesOnly ? "Show all voices" : "Show selected voices")</button>
+                <button @onclick="SaveAllowedVoices" disabled="@(!_adminAllVoices.Any())">Save allowed voices</button>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(_voiceCatalogMessage))
+            {
+                <div>@_voiceCatalogMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@if (_showSettingsSection)
+{
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Settings</h4>
+
+<div style="max-width:360px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <label style="display:flex;flex-direction:column;gap:4px">
+            Max login hours
+            <input @bind="_maxLoginHrs" inputmode="numeric" />
+        </label>
+        <label style="display:flex;align-items:center;gap:8px">
+            <input type="checkbox" @bind="_allowPlayerPinChange" />
+            Allow players to change their PIN
+            <br />
+            <i><b>Note:</b> When disabled, only Admins can change PINs</i>
+        </label>
+        <button @onclick="SaveSettings">Save</button>
+        @if (!string.IsNullOrWhiteSpace(_settingsMessage))
+        {
+            <div>@_settingsMessage</div>
+        }
+    </div>
+</div>
+
+ <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Change Admin PIN</h4>
+
+<div style="max-width:360px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        To change Admin Pin: <a href="/player">Reset your password</a> page and follow instructions there.
+    </div>
+</div>
+}
+
+@if (_showLogViewer)
+{
+    <div style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:1000;" @onclick="CloseLogViewer">
+        <div style="background:white;padding:20px;border-radius:8px;max-width:90%;max-height:90%;overflow:auto;box-shadow:0 4px 6px rgba(0,0,0,0.1);" @onclick:stopPropagation="true">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <h3 style="margin:0;">Activity Logs</h3>
+                <button @onclick="CloseLogViewer" style="padding:4px 12px;">Close</button>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+                <label style="display:flex;align-items:center;gap:4px;">
+                    Show last:
+                    <select @bind="_logCount" @bind:after="LoadLogs">
+                        <option value="50">50</option>
+                        <option value="100">100</option>
+                        <option value="200">200</option>
+                        <option value="500">500</option>
+                    </select>
+                    entries
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;">
+                    Filter by type:
+                    <select @bind="_selectedLogType" @bind:after="LoadLogs">
+                        <option value="">All</option>
+                        <option value="1">Player Login</option>
+                        <option value="2">Player Logout</option>
+                        <option value="3">Player PIN Change</option>
+                        <option value="4">Player Timeout Logout</option>
+                        <option value="30">System Startup</option>
+                        <option value="32">Error</option>
+                        <option value="33">Warning</option>
+                        <option value="40">Admin Action</option>
+                        <option value="41">User Management</option>
+                        <option value="42">Settings Changed</option>
+                    </select>
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;">
+                    Player ID:
+                    <input type="number" @bind="_searchPlayerId" @bind:after="LoadLogs" style="width:80px;" placeholder="Any" />
+                </label>
+                <label style="display:flex;align-items:center;gap:4px;">
+                    Group ID:
+                    <input type="number" @bind="_searchGroupId" @bind:after="LoadLogs" style="width:80px;" placeholder="Any" />
+                </label>
+                <button @onclick="LoadLogs">Refresh</button>
+                <button @onclick="ClearSearch">Clear</button>
+            </div>
+
+            @if (_logs == null)
+            {
+                <p>Loading logs...</p>
+            }
+            else if (_logs.Count == 0)
+            {
+                <p>No log entries found.</p>
+            }
+            else
+            {
+                <div style="overflow:auto;max-height:60vh;">
+                    <table style="border-collapse:collapse;width:100%;font-size:13px;">
+                        <thead style="position:sticky;top:0;background:white;">
+                            <tr style="border-bottom:2px solid #ccc;">
+                                <th style="text-align:left;padding:8px;white-space:nowrap;">Timestamp</th>
+                                <th style="text-align:left;padding:8px;white-space:nowrap;">Type</th>
+                                <th style="text-align:left;padding:8px;white-space:nowrap;">Player</th>
+                                <th style="text-align:left;padding:8px;white-space:nowrap;">Group</th>
+                                <th style="text-align:left;padding:8px;">Details</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var log in _logs)
+                            {
+                                <tr style="border-bottom:1px solid #eee;">
+                                    <td style="padding:8px;white-space:nowrap;vertical-align:top;">@log.Timestamp.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    <td style="padding:8px;white-space:nowrap;vertical-align:top;">
+                                        <span style="background:@GetLogTypeColor(log.LogType);color:white;padding:2px 6px;border-radius:3px;font-size:11px;">
+                                            @log.LogType
+                                        </span>
+                                    </td>
+                                    <td style="padding:8px;white-space:nowrap;vertical-align:top;">
+                                        @if (log.PlayerId > 0)
+                                        {
+                                            @(_userNames.TryGetValue(log.PlayerId, out var playerName) ? playerName : $"Player {log.PlayerId}")
+                                        }
+                                        else
+                                        {
+                                            <text>System</text>
+                                        }
+                                    </td>
+                                    <td style="padding:8px;white-space:nowrap;vertical-align:top;">
+                                        @GetGroupName(log.GroupId)
+                                    </td>
+                                    <td style="padding:8px;vertical-align:top;">@log.Details</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+                <div style="margin-top:12px;font-size:12px;color:#666;">
+                    Showing @_logs.Count log entries
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _showSettingsSection = false;
+    private int? _currentUserId;
+    private string _currentUserName = "Unknown";
+
+    private Dictionary<int, string> _userNames = new();
+    private List<WalkieTalkie.Data.Group> _userGroups = new();
+
+    // Log viewer state
+    private bool _showLogViewer = false;
+    private List<WalkieTalkie.Data.AppLog>? _logs = null;
+    private int _logCount = 100;
+    private string _selectedLogType = "";
+    private int? _searchPlayerId = null;
+    private int? _searchGroupId = null;
+
+    private int _maxLoginHrs = 4;                // Max time a login session is valid before requiring re-login
+    private bool _allowPlayerPinChange = true;
+    private string _settingsMessage = "";
+    private string _voiceCatalogMessage = "";
+    private bool _checkingChromeVoices;
+    private List<WalkieTalkie.Data.UsableMsVoice> _chromeUsableVoices = new();
+    private List<VoiceOptionInternal> _adminAllVoices = new();
+    private List<VoiceOptionInternal> _adminFilteredVoices = new();
+    private List<string> _adminLanguages = new();
+    private List<string> _adminRegions = new();
+    private HashSet<string> _adminSelectedVoiceTokens = new(StringComparer.OrdinalIgnoreCase);
+    private string _adminSelectedLanguage = "";
+    private string _adminSelectedRegion = "";
+    private string _adminFocusedVoiceKey = "";
+    private bool _adminShowSelectedVoicesOnly;
+    private bool _adminVoicesLoaded;
+    private int _adminRawVoiceCount;
+    private bool _adminHasSpeechSynthesis;
+    private bool _adminHasSpeechSynthesisUtterance;
+    private int _adminBrowserVoiceCount;
+
+    private sealed class JsVoiceInfo
+    {
+        public string? voiceURI { get; set; }
+        public string? name { get; set; }
+        public string? lang { get; set; }
+    }
+
+    private sealed class VoiceDiagnostics
+    {
+        public bool hasSpeechSynthesis { get; set; }
+        public bool hasUtterance { get; set; }
+        public int voiceCount { get; set; }
+    }
+
+    private sealed class VoiceOptionInternal
+    {
+        public string Key { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string Lang { get; set; } = "";
+        public string Token { get; set; } = "";
+        public string VoiceName { get; set; } = "";
+        public string VoiceUri { get; set; } = "";
+    }
+
+    private void ShowAdminTopSection()
+    {
+        _showSettingsSection = false;
+    }
+
+    private void ShowAdminSettingsSection()
+    {
+        _showSettingsSection = true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var principal = authState.User;
+        _currentUserName = principal?.Identity?.Name ?? "Unknown";
+        var uid = principal?.FindFirst("uid")?.Value;
+        if (int.TryParse(uid, out var parsedId))
+        {
+            _currentUserId = parsedId;
+        }
+
+        var users = await Auth.ListUsersAsync();
+        _userNames = users.ToDictionary(x => x.Id, x => x.Name ?? "");
+
+        // Load all groups for group name resolution in logs
+        _userGroups = await Auth.ListGroupsAsync();
+
+        _maxLoginHrs = await Settings.GetMaxLoginHrsAsync();
+        _allowPlayerPinChange = await Settings.GetAllowPlayerPinChangeAsync();
+        _chromeUsableVoices = UsableMsVoices.GetVoices("chrome").ToList();
+        _adminSelectedVoiceTokens = _chromeUsableVoices
+            .Select(x => x.Token)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private string GetUserName(int userId)
+    {
+        if (userId <= 0) return "";
+        return _userNames.TryGetValue(userId, out var name) ? name : "";
+    }
+
+    private async Task SaveSettings()
+    {
+        _settingsMessage = "";
+        var ok1 = await Settings.UpdateMaxLoginHrsAsync(_maxLoginHrs);
+        var ok2 = await Settings.UpdateAllowPlayerPinChangeAsync(_allowPlayerPinChange);
+        _settingsMessage = (ok1 && ok2) ? "Saved." : "Invalid value.";
+    }
+
+    private async Task LoadAdminVoicesFromUserGesture()
+    {
+        _voiceCatalogMessage = "";
+        _checkingChromeVoices = true;
+
+        try
+        {
+            try
+            {
+                await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+            }
+            catch
+            {
+            }
+
+            List<JsVoiceInfo>? raw = null;
+            VoiceDiagnostics? diagnostics = null;
+
+            try
+            {
+                using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                diagnostics = await JS.InvokeAsync<VoiceDiagnostics>("WalkieTalkieVoice.getVoiceDiagnostics", diagCts.Token);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(16));
+                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("WalkieTalkieVoice.getVoicesAsync", cts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                try
+                {
+                    await JS.InvokeAsync<bool>("WalkieTalkieVoice.refreshVoices");
+                }
+                catch
+                {
+                }
+
+                using var retryCts = new CancellationTokenSource(TimeSpan.FromSeconds(16));
+                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("WalkieTalkieVoice.getVoicesAsync", retryCts.Token);
+            }
+
+            _adminHasSpeechSynthesis = diagnostics?.hasSpeechSynthesis ?? false;
+            _adminHasSpeechSynthesisUtterance = diagnostics?.hasUtterance ?? false;
+            _adminBrowserVoiceCount = diagnostics?.voiceCount ?? -1;
+            _adminRawVoiceCount = raw?.Count ?? 0;
+
+            _adminAllVoices = (raw ?? new List<JsVoiceInfo>())
+                .Select(v =>
+                {
+                    var voiceUri = (v?.voiceURI ?? string.Empty).Trim();
+                    var voiceName = (v?.name ?? string.Empty).Trim();
+                    var voiceLang = (v?.lang ?? string.Empty).Trim();
+                    var key = !string.IsNullOrWhiteSpace(voiceUri)
+                        ? $"uri:{voiceUri}"
+                        : $"name:{voiceName}|lang:{voiceLang}";
+                    var label = string.IsNullOrWhiteSpace(voiceLang)
+                        ? voiceName
+                        : $"{voiceName} ({voiceLang})";
+                    var token = VoiceCatalog.NormalizeToken(voiceName, voiceLang);
+
+                    return new VoiceOptionInternal
+                    {
+                        Key = key,
+                        Label = label,
+                        Lang = voiceLang,
+                        Token = token,
+                        VoiceName = voiceName,
+                        VoiceUri = voiceUri
+                    };
+                })
+                .Where(x => !string.IsNullOrWhiteSpace(x.Label))
+                .Where(x => !string.IsNullOrWhiteSpace(x.Token))
+                .DistinctBy(x => x.Key)
+                .OrderBy(x => x.Label)
+                .ToList();
+
+            _adminVoicesLoaded = _adminAllVoices.Count > 0;
+            ApplyAdminVoiceFilters();
+            _voiceCatalogMessage = _adminAllVoices.Count == 0
+                ? $"No voices found in this browser instance. Raw voices: {_adminRawVoiceCount}. speechSynthesis: {_adminHasSpeechSynthesis}. utterance: {_adminHasSpeechSynthesisUtterance}. browser count: {_adminBrowserVoiceCount}."
+                : $"Loaded {_adminAllVoices.Count} voices from this browser. Raw voices: {_adminRawVoiceCount}. speechSynthesis: {_adminHasSpeechSynthesis}. utterance: {_adminHasSpeechSynthesisUtterance}. browser count: {_adminBrowserVoiceCount}.";
+        }
+        catch (OperationCanceledException)
+        {
+            _voiceCatalogMessage = $"Voice loading timed out. Tap Load voices again. speechSynthesis: {_adminHasSpeechSynthesis}. utterance: {_adminHasSpeechSynthesisUtterance}. browser count: {_adminBrowserVoiceCount}.";
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.Message ?? string.Empty;
+            if (msg.Length > 160) msg = msg.Substring(0, 160);
+            _voiceCatalogMessage = $"Voice load failed: {ex.GetType().Name}: {msg}";
+        }
+        finally
+        {
+            _checkingChromeVoices = false;
+        }
+    }
+
+    private async Task OnAdminLanguageChanged(ChangeEventArgs e)
+    {
+        _adminSelectedLanguage = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _adminSelectedRegion = "";
+        _adminFocusedVoiceKey = "";
+        ApplyAdminVoiceFilters();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnAdminRegionChanged(ChangeEventArgs e)
+    {
+        _adminSelectedRegion = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _adminFocusedVoiceKey = "";
+        ApplyAdminVoiceFilters();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnAdminFocusedVoiceChanged(ChangeEventArgs e)
+    {
+        _adminFocusedVoiceKey = (e?.Value?.ToString() ?? string.Empty).Trim();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private Task OnAdminVoiceCheckedChanged(VoiceOptionInternal voice, ChangeEventArgs e)
+    {
+        var isChecked = false;
+        if (e?.Value is bool b)
+        {
+            isChecked = b;
+        }
+        else
+        {
+            _ = bool.TryParse(e?.Value?.ToString(), out isChecked);
+        }
+
+        if (isChecked)
+        {
+            _adminSelectedVoiceTokens.Add(voice.Token);
+        }
+        else
+        {
+            _adminSelectedVoiceTokens.Remove(voice.Token);
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task SelectAllFilteredAdminVoices()
+    {
+        foreach (var voice in _adminFilteredVoices)
+        {
+            _adminSelectedVoiceTokens.Add(voice.Token);
+        }
+
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task ClearAllFilteredAdminVoices()
+    {
+        foreach (var voice in _adminFilteredVoices)
+        {
+            _adminSelectedVoiceTokens.Remove(voice.Token);
+        }
+
+        ApplyAdminVoiceFilters();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private Task ToggleShowSelectedAdminVoices()
+    {
+        _adminShowSelectedVoicesOnly = !_adminShowSelectedVoicesOnly;
+        _adminFocusedVoiceKey = "";
+        ApplyAdminVoiceFilters();
+        return InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SaveAllowedVoices()
+    {
+        _voiceCatalogMessage = "";
+
+        try
+        {
+            var items = _adminAllVoices
+                .Where(x => _adminSelectedVoiceTokens.Contains(x.Token))
+                .Select(x => (x.Token, x.VoiceName, (string?)x.Lang, string.IsNullOrWhiteSpace(x.VoiceUri) ? null : x.VoiceUri))
+                .ToList();
+
+            var saved = await UsableMsVoices.ReplaceVoicesAsync("chrome", items);
+            _chromeUsableVoices = UsableMsVoices.GetVoices("chrome").ToList();
+            _adminSelectedVoiceTokens = _chromeUsableVoices
+                .Select(x => x.Token)
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _voiceCatalogMessage = $"Saved {saved} allowed Chrome voices.";
+        }
+        catch (Exception ex)
+        {
+            var msg = ex.Message ?? string.Empty;
+            if (msg.Length > 160) msg = msg.Substring(0, 160);
+            _voiceCatalogMessage = $"Saving allowed voices failed: {ex.GetType().Name}: {msg}";
+        }
+    }
+
+    private void ApplyAdminVoiceFilters()
+    {
+        static HashSet<string> KnownLanguages() => new(StringComparer.OrdinalIgnoreCase)
+        {
+            "en","fr","es","de","it","pt","nl","sv","da","no","fi"
+        };
+
+        static HashSet<string> KnownRegionsForLang(string? language)
+        {
+            if (!string.Equals(language, "en", StringComparison.OrdinalIgnoreCase))
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            }
+
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "US","GB","AU","CA","NZ","IE","IN","ZA"
+            };
+        }
+
+        static string GetLanguage(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return lang.ToLowerInvariant();
+            if (sep <= 0) return "";
+            return lang.Substring(0, sep).Trim().ToLowerInvariant();
+        }
+
+        static string GetRegion(string? lang)
+        {
+            if (string.IsNullOrWhiteSpace(lang)) return "";
+            lang = lang.Trim();
+            var sep = lang.IndexOf('-');
+            if (sep < 0) sep = lang.IndexOf('_');
+            if (sep < 0) return "";
+            if (sep + 1 >= lang.Length) return "";
+            return lang.Substring(sep + 1).Trim().ToUpperInvariant();
+        }
+
+        _adminLanguages = _adminAllVoices
+            .Select(v => GetLanguage(v.Lang))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => KnownLanguages().Contains(x) ? 0 : 1)
+            .ThenBy(x => FormatLanguageLabel(x))
+            .ThenBy(x => x)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_adminSelectedLanguage)
+            && !_adminLanguages.Contains(_adminSelectedLanguage, StringComparer.OrdinalIgnoreCase))
+        {
+            _adminSelectedLanguage = "";
+            _adminSelectedRegion = "";
+        }
+
+        var langFiltered = string.IsNullOrWhiteSpace(_adminSelectedLanguage)
+            ? _adminAllVoices
+            : _adminAllVoices.Where(v => string.Equals(GetLanguage(v.Lang), _adminSelectedLanguage, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        _adminRegions = langFiltered
+            .Select(v => GetRegion(v.Lang))
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => KnownRegionsForLang(_adminSelectedLanguage).Contains(x) ? 0 : 1)
+            .ThenBy(x => FormatRegionLabel(_adminSelectedLanguage, x))
+            .ThenBy(x => x)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_adminSelectedRegion)
+            && !_adminRegions.Contains(_adminSelectedRegion, StringComparer.OrdinalIgnoreCase))
+        {
+            _adminSelectedRegion = "";
+        }
+
+        var regionFiltered = string.IsNullOrWhiteSpace(_adminSelectedRegion)
+            ? langFiltered
+            : langFiltered.Where(v => string.Equals(GetRegion(v.Lang), _adminSelectedRegion, StringComparison.OrdinalIgnoreCase)).ToList();
+
+        _adminFilteredVoices = (_adminShowSelectedVoicesOnly
+                ? regionFiltered.Where(v => _adminSelectedVoiceTokens.Contains(v.Token)).ToList()
+                : regionFiltered)
+            .OrderBy(v => v.Label)
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(_adminFocusedVoiceKey)
+            && !_adminFilteredVoices.Any(v => v.Key == _adminFocusedVoiceKey))
+        {
+            _adminFocusedVoiceKey = "";
+        }
+    }
+
+    private static string FormatLanguageLabel(string language)
+    {
+        language = (language ?? string.Empty).Trim().ToLowerInvariant();
+        return language switch
+        {
+            "en" => "English (en)",
+            "fr" => "French (fr)",
+            "es" => "Spanish (es)",
+            "de" => "German (de)",
+            "it" => "Italian (it)",
+            "pt" => "Portuguese (pt)",
+            "nl" => "Dutch (nl)",
+            "sv" => "Swedish (sv)",
+            "da" => "Danish (da)",
+            "no" => "Norwegian (no)",
+            "fi" => "Finnish (fi)",
+            _ => language
+        };
+    }
+
+    private static string FormatRegionLabel(string? language, string region)
+    {
+        var lang = (language ?? string.Empty).Trim();
+        region = (region ?? string.Empty).Trim().ToUpperInvariant();
+        if (string.Equals(lang, "en", StringComparison.OrdinalIgnoreCase))
+        {
+            return region switch
+            {
+                "US" => "United States (en-US)",
+                "GB" => "United Kingdom (en-GB)",
+                "AU" => "Australia (en-AU)",
+                "CA" => "Canada (en-CA)",
+                "NZ" => "New Zealand (en-NZ)",
+                "IE" => "Ireland (en-IE)",
+                "IN" => "India (en-IN)",
+                "ZA" => "South Africa (en-ZA)",
+                _ => region
+            };
+        }
+
+        return string.IsNullOrWhiteSpace(lang)
+            ? region
+            : $"{region} ({lang}-{region})";
+    }
+
+    private async Task OpenLogViewer()
+    {
+        _showLogViewer = true;
+        await LoadLogs();
+    }
+
+    private async Task DownloadDatabaseBackup()
+    {
+        try
+        {
+            var contextId = await JS.InvokeAsync<string>("WalkieTalkieAuth.getContextId");
+            if (string.IsNullOrWhiteSpace(contextId))
+            {
+                _settingsMessage = "Download failed: no active login context.";
+                return;
+            }
+
+            var encoded = Uri.EscapeDataString(contextId);
+            Nav.NavigateTo($"/api/admin/download-database?contextId={encoded}", forceLoad: true);
+        }
+        catch (Exception ex)
+        {
+            _settingsMessage = $"Download failed: {ex.Message}";
+        }
+    }
+
+    private void CloseLogViewer()
+    {
+        _showLogViewer = false;
+        _logs = null;
+    }
+
+    private async Task LoadLogs()
+    {
+        try
+        {
+            // Parse search parameters
+            LogType? logType = null;
+            if (!string.IsNullOrWhiteSpace(_selectedLogType))
+            {
+                if (int.TryParse(_selectedLogType, out var typeValue))
+                {
+                    logType = (LogType)typeValue;
+                }
+            }
+
+            // Use the new search method
+            _logs = await AppLog.SearchLogsAsync(
+                playerId: _searchPlayerId,
+                groupId: _searchGroupId,
+                logType: logType,
+                count: _logCount
+            );
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading logs: {ex.Message}");
+            _logs = new List<WalkieTalkie.Data.AppLog>();
+        }
+    }
+
+    private void ClearSearch()
+    {
+        _selectedLogType = "";
+        _searchPlayerId = null;
+        _searchGroupId = null;
+        _ = LoadLogs();
+    }
+
+    private string GetLogTypeColor(LogType logType)
+    {
+        return logType switch
+        {
+            LogType.PlayerLogin => "#28a745",
+            LogType.PlayerLogout => "#6c757d",
+            LogType.PlayerPinChange => "#17a2b8",
+            LogType.SystemStartup => "#28a745",
+            LogType.Error => "#dc3545",
+            LogType.Warning => "#fd7e14",
+            LogType.AdminAction => "#6f42c1",
+            LogType.UserManagement => "#20c997",
+            LogType.SettingsChanged => "#6610f2",
+            _ => "#6c757d"
+        };
+    }
+
+    private int? GetCurrentUserId()
+    {
+        if (_currentUserId.HasValue) return _currentUserId;
+
+        // Fallback: lookup by current principal name
+        var name = _currentUserName;
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            var appUser = Auth.GetUserByNameAsync(name).GetAwaiter().GetResult();
+            if (appUser != null)
+            {
+                _currentUserId = appUser.Id;
+                return appUser.Id;
+            }
+        }
+
+        return null;
+    }
+
+    private string GetGroupName(int? groupId)
+    {
+        if (!groupId.HasValue)
+        {
+            return "-";
+        }
+
+        var group = _userGroups?.FirstOrDefault(ug => ug.Id == groupId.Value);
+        return group?.Name ?? $"Group {groupId.Value}";
+    }
+
+    private async Task ResetDatabase()
+    {
+        // First confirmation - basic warning
+        if (!await JS.InvokeAsync<bool>("confirm", "⚠️ WARNING: This will permanently delete ALL data including:\n\n• All user accounts\n• All groups\n• All settings\n\nThis action cannot be undone. Are you absolutely sure?"))
+        {
+            // Second confirmation - detailed warning about app data
+            if (!await JS.InvokeAsync<bool>("confirm", "🚨 FINAL WARNING: This will delete all data for ALL players!\n\nThis includes:\n• All player accounts and PINs\n• All voice preferences\n• All group membership data\n• All settings and preferences\n\nPlayers will lose their entire history!\n\nClick OK to confirm this irreversible action, or Cancel to abort."))
+            {
+                try
+                {
+                    // Get database file path
+                    var dbPath = Path.Combine(Directory.GetCurrentDirectory(), "auth.db");
+
+                    // Close any existing connections
+                    await Task.Delay(100); // Give time for any pending operations
+
+                    // Delete the database file
+                    if (File.Exists(dbPath))
+                    {
+                        File.Delete(dbPath);
+
+                        // Show success message
+                        await JS.InvokeAsync<string>("alert", "✅ Database successfully reset!\n\nThe application will now restart with a fresh database.\n\nYou will need to:\n1. Create admin account\n2. Create groups\n3. Create player accounts");
+
+                        // Restart the application
+                        Nav.NavigateTo("/", forceLoad: true);
+                    }
+                    else
+                    {
+                        await JS.InvokeAsync<string>("alert", "Database file not found. The application will restart with a fresh database.");
+                        Nav.NavigateTo("/", forceLoad: true);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    await JS.InvokeAsync<string>("alert", $"Error resetting database: {ex.Message}\n\nPlease contact support or restart the application manually.");
+                }
+            }
+        }
+    }
+}

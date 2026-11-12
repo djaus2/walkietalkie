@@ -1,0 +1,363 @@
+@page "/admin/users"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using WalkieTalkie.Services
+@using WalkieTalkie.Data
+@inject AuthService Auth
+@inject UsableMsVoiceService UsableMsVoices
+@inject IJSRuntime JS
+@inject IHttpContextAccessor HttpContextAccessor
+
+<PageTitleHeading Title="Manage Players" HeadingLevel="2" />
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Add Player</h4>
+
+<div style="max-width:360px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <input @bind="_name" placeholder="Name" />
+        <input @bind="_pin" placeholder="PIN (4-6 digits)" inputmode="numeric" maxlength="6" />
+        <label><input type="checkbox" @bind="_isPlayer" /> Player</label>
+        <label><input type="checkbox" @bind="_isAdmin" /> Admin</label>
+        <button @onclick="OnAdd">Add player</button>
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <div>@_message</div>
+        }
+        <a href="/admin">Back</a>
+    </div>
+</div>
+
+<hr />
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Players</h4>
+
+@if (_users is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div style="width:150%;max-width:150%;overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;">
+            <thead>
+            <tr>
+                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Name</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Roles</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Player voice</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Desktop fallback voice</th>
+                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var u in _users)
+            {
+                if (!string.IsNullOrWhiteSpace(u.Roles) && u.Roles.Contains("Admin", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+                <tr>
+                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">@u.Name</td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">@u.Roles</td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #eee;max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@GetVoiceDisplay(u)">
+                        @GetVoiceDisplay(u)
+                    </td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #eee;min-width:320px;">
+                        <div style="display:flex;flex-direction:column;gap:6px;max-width:320px;">
+                            <select value="@GetFallbackSelection(u)" @onchange="(e => OnFallbackVoiceChanged(u.Id, e))">
+                                <option value="">Default</option>
+                                @foreach (var voice in _desktopFallbackVoices)
+                                {
+                                    <option @key="voice.Token" value="@GetFallbackVoiceKey(voice)">@FormatFallbackVoiceLabel(voice)</option>
+                                }
+                            </select>
+                            <div style="font-size:12px;opacity:0.85;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="@GetAdminFallbackDisplay(u)">
+                                @GetAdminFallbackDisplay(u)
+                            </div>
+                        </div>
+                    </td>
+                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">
+                        <button @onclick="() => SaveFallbackVoiceAsync(u.Id)">Save fallback</button>
+                        <button @onclick="() => SelectReset(u.Id, u.Name)">Reset PIN to 9999</button>
+                        <button style="margin-left:6px" @onclick="() => SelectDelete(u.Id, u.Name)">Delete</button>
+                        @if (_fallbackMessages.TryGetValue(u.Id, out var fallbackMessage) && !string.IsNullOrWhiteSpace(fallbackMessage))
+                        {
+                            <div style="margin-top:6px;font-size:12px;max-width:260px;">@fallbackMessage</div>
+                        }
+                    </td>
+                </tr>
+            }
+            <a href="/admin">Back</a>
+        </tbody>
+    </table>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(_actionTargetName))
+    {
+        <div style="margin-top:12px;padding:10px;border:1px solid #ccc;max-width:520px;">
+            <div style="font-weight:600">@_actionTitle</div>
+            <div style="margin-top:6px;">Target player: <b>@_actionTargetName</b></div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+                <input @bind="_adminPin" placeholder="Enter your admin PIN (4-6 digits)" inputmode="numeric" maxlength="6" />
+                <label>
+                    <input type="checkbox" @bind="_confirm" /> Confirm
+                </label>
+                <div style="display:flex;gap:8px;">
+                    <button @onclick="ExecuteAction">Execute</button>
+                    <button @onclick="CancelAction">Cancel</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_actionMessage))
+                {
+                    <div>@_actionMessage</div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string _name = "";
+    private string _pin = "9999";
+    private bool _isAdmin = false;
+    private bool _isPlayer = true;
+    private string _message = "";
+
+    private List<WalkieTalkie.Data.AppUser>? _users;
+    private IReadOnlyList<UsableMsVoice> _desktopFallbackVoices = Array.Empty<UsableMsVoice>();
+    private Dictionary<int, string> _fallbackSelections = new();
+    private Dictionary<int, string> _fallbackMessages = new();
+    private int? _actionTargetId;
+    private string _actionTargetName = "";
+    private string _adminPin = "";
+    private bool _confirm = false;
+    private string _actionTitle = "";
+    private string _actionMessage = "";
+    private string _actionKind = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Auth.ListUsersAsync();
+        _desktopFallbackVoices = UsableMsVoices.GetVoices("chrome");
+        SyncFallbackSelections();
+    }
+
+    private async Task OnAdd()
+    {
+        _message = "";
+        var user = await Auth.CreateUserAsync((_name ?? "").Trim(), (_pin ?? "").Trim(), _isAdmin, _isPlayer);
+        if (user is null)
+        {
+            _message = "Unable to add player (check name uniqueness, PIN, roles).";
+            return;
+        }
+
+        _message = $"Player '{user.Name}' added.";
+        _name = "";
+        _pin = "9999";
+        _isAdmin = false;
+        _isPlayer = true;
+
+        _users = await Auth.ListUsersAsync();
+        SyncFallbackSelections();
+    }
+
+    private void SelectReset(int userId, string name)
+    {
+        _actionKind = "reset";
+        _actionTargetId = userId;
+        _actionTargetName = name;
+        _actionTitle = "Reset PIN to 9999";
+        _actionMessage = "";
+        _adminPin = "";
+        _confirm = false;
+    }
+
+    private void SelectDelete(int userId, string name)
+    {
+        _actionKind = "delete";
+        _actionTargetId = userId;
+        _actionTargetName = name;
+        _actionTitle = "Delete player";
+        _actionMessage = "";
+        _adminPin = "";
+        _confirm = false;
+    }
+
+    private void CancelAction()
+    {
+        _actionKind = "";
+        _actionTargetId = null;
+        _actionTargetName = "";
+        _actionTitle = "";
+        _actionMessage = "";
+        _adminPin = "";
+        _confirm = false;
+    }
+
+    private async Task ExecuteAction()
+    {
+        _actionMessage = "";
+
+        if (!_actionTargetId.HasValue)
+        {
+            _actionMessage = "No target selected.";
+            return;
+        }
+
+        if (!_confirm)
+        {
+            _actionMessage = "You must confirm.";
+            return;
+        }
+
+        var adminUserId = GetCurrentUserId();
+        if (!adminUserId.HasValue)
+        {
+            _actionMessage = "No admin player id.";
+            return;
+        }
+
+        var pin = (_adminPin ?? "").Trim();
+        var ok = false;
+
+        if (_actionKind == "reset")
+        {
+            ok = await Auth.ResetUserPinTo9999Async(_actionTargetId.Value, adminUserId.Value, pin);
+        }
+        else if (_actionKind == "delete")
+        {
+            ok = await Auth.DeleteUserAsync(_actionTargetId.Value, adminUserId.Value, pin);
+        }
+        else
+        {
+            _actionMessage = "Unknown action.";
+            return;
+        }
+
+        _actionMessage = ok ? "Done." : "Failed (check admin PIN, or target is protected).";
+        _users = await Auth.ListUsersAsync();
+        SyncFallbackSelections();
+    }
+
+    private string GetVoiceDisplay(AppUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.PreferredTtsVoice))
+            return "Default";
+        
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(user.PreferredTtsLanguage))
+            parts.Add(user.PreferredTtsLanguage);
+        if (!string.IsNullOrWhiteSpace(user.PreferredTtsRegion))
+            parts.Add(user.PreferredTtsRegion.ToUpper());
+        
+        var voice = user.PreferredTtsVoice;
+        if (voice.StartsWith("uri:"))
+            voice = voice.Substring(4);
+        
+        var display = voice;
+        if (parts.Count > 0)
+            display += $" ({string.Join(", ", parts)})";
+        
+        return display;
+    }
+
+    private string GetAdminFallbackDisplay(AppUser user)
+    {
+        if (string.IsNullOrWhiteSpace(user.AdminDesktopFallbackTtsVoice))
+            return "Default";
+
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(user.AdminDesktopFallbackTtsLanguage))
+            parts.Add(user.AdminDesktopFallbackTtsLanguage);
+        if (!string.IsNullOrWhiteSpace(user.AdminDesktopFallbackTtsRegion))
+            parts.Add(user.AdminDesktopFallbackTtsRegion.ToUpper());
+
+        var voice = user.AdminDesktopFallbackTtsVoice;
+        if (voice.StartsWith("uri:"))
+            voice = voice.Substring(4);
+
+        var display = voice;
+        if (parts.Count > 0)
+            display += $" ({string.Join(", ", parts)})";
+
+        return display;
+    }
+
+    private string GetFallbackSelection(AppUser user)
+    {
+        return _fallbackSelections.TryGetValue(user.Id, out var value)
+            ? value ?? string.Empty
+            : user.AdminDesktopFallbackTtsVoice ?? string.Empty;
+    }
+
+    private void OnFallbackVoiceChanged(int userId, ChangeEventArgs e)
+    {
+        _fallbackSelections[userId] = (e?.Value?.ToString() ?? string.Empty).Trim();
+        _fallbackMessages[userId] = string.Empty;
+    }
+
+    private async Task SaveFallbackVoiceAsync(int userId)
+    {
+        var selected = _fallbackSelections.TryGetValue(userId, out var value)
+            ? (value ?? string.Empty).Trim()
+            : string.Empty;
+
+        var selectedVoice = _desktopFallbackVoices.FirstOrDefault(x => string.Equals(GetFallbackVoiceKey(x), selected, StringComparison.OrdinalIgnoreCase));
+        var okVoice = await Auth.UpdateAdminDesktopFallbackTtsVoiceAsync(userId, selected);
+        var okLanguage = okVoice && await Auth.UpdateAdminDesktopFallbackTtsLanguageAsync(userId, selectedVoice?.VoiceLang);
+        var okRegion = okVoice && await Auth.UpdateAdminDesktopFallbackTtsRegionAsync(userId, GetRegion(selectedVoice?.VoiceLang));
+
+        var statusMessage = (okVoice && okLanguage && okRegion) ? "Saved." : "Save failed.";
+        _users = await Auth.ListUsersAsync();
+        SyncFallbackSelections();
+        _fallbackMessages[userId] = statusMessage;
+    }
+
+    private static string FormatFallbackVoiceLabel(UsableMsVoice voice)
+    {
+        var label = voice.VoiceName;
+        if (!string.IsNullOrWhiteSpace(voice.VoiceLang))
+        {
+            label += $" ({voice.VoiceLang})";
+        }
+        return label;
+    }
+
+    private static string GetFallbackVoiceKey(UsableMsVoice voice)
+    {
+        var uri = (voice.VoiceUri ?? string.Empty).Trim();
+        var name = (voice.VoiceName ?? string.Empty).Trim();
+        var lang = (voice.VoiceLang ?? string.Empty).Trim();
+
+        return !string.IsNullOrWhiteSpace(uri)
+            ? $"uri:{uri}"
+            : $"name:{name}|lang:{lang}";
+    }
+
+    private static string? GetRegion(string? lang)
+    {
+        if (string.IsNullOrWhiteSpace(lang)) return null;
+        var text = lang.Trim();
+        var sep = text.IndexOf('-');
+        if (sep < 0) sep = text.IndexOf('_');
+        if (sep < 0 || sep + 1 >= text.Length) return null;
+        return text.Substring(sep + 1).Trim().ToUpperInvariant();
+    }
+
+    private void SyncFallbackSelections()
+    {
+        _fallbackSelections.Clear();
+        if (_users is null) return;
+
+        foreach (var user in _users)
+        {
+            _fallbackSelections[user.Id] = user.AdminDesktopFallbackTtsVoice ?? string.Empty;
+        }
+    }
+
+    private int? GetCurrentUserId()
+    {
+        var user = HttpContextAccessor.HttpContext?.User;
+        var raw = user?.FindFirst("uid")?.Value;
+        return int.TryParse(raw, out var id) ? id : null;
+    }
+}

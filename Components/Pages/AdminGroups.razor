@@ -1,0 +1,349 @@
+@page "/admin/groups"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using WalkieTalkie.Services
+@using WalkieTalkie.Data
+@inject AuthService Auth
+@inject IHttpContextAccessor HttpContextAccessor
+
+<PageTitleHeading Title="Manage Groups" HeadingLevel="2" />
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Create Group</h4>
+
+<div style="max-width:500px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+        <input @bind="_groupName" placeholder="Group name" />
+        <input @bind="_groupDescription" placeholder="Description (optional)" />
+        <select @bind="_selectedOwnerId">
+            <option value="">Select group owner</option>
+            @foreach (var player in _availablePlayers)
+            {
+                <option value="@player.Id">@player.Name</option>
+            }
+        </select>
+        <button @onclick="OnCreateGroup">Create group</button>
+        @if (!string.IsNullOrWhiteSpace(_message))
+        {
+            <div>@_message</div>
+        }
+        <a href="/admin">Back</a>
+    </div>
+</div>
+
+<hr />
+
+<h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Groups</h4>
+
+@if (_groups is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div style="width:150%;max-width:150%;overflow-x:auto;">
+        <table style="border-collapse:collapse;width:100%;">
+            <thead>
+                <tr>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Name</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Description</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Owner</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Members</th>
+                    <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var g in _groups)
+                {
+                    <tr>
+                        <td style="padding:4px 8px;border-bottom:1px solid #eee;">@g.Name</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #eee;">@g.Description</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #eee;">@g.OwnerUser?.Name</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #eee;">@g.Members.Count</td>
+                        <td style="padding:4px 8px;border-bottom:1px solid #eee;">
+                            <button @onclick="() => SelectManageMembers(g.Id, g.Name)">Manage Members</button>
+                            <button style="margin-left:6px" @onclick="() => SelectDelete(g.Id, g.Name)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <a href="/admin">Back</a>
+
+    @if (!string.IsNullOrWhiteSpace(_actionTargetName))
+    {
+        <div style="margin-top:12px;padding:10px;border:1px solid #ccc;max-width:520px;">
+            <div style="font-weight:600">@_actionTitle</div>
+            <div style="margin-top:6px;">Target group: <b>@_actionTargetName</b></div>
+            <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px;">
+                <input @bind="_adminPin" placeholder="Enter your admin PIN (4-6 digits)" inputmode="numeric" maxlength="6" />
+                <label>
+                    <input type="checkbox" @bind="_confirm" /> Confirm
+                </label>
+                <div style="display:flex;gap:8px;">
+                    <button @onclick="ExecuteAction">Execute</button>
+                    <button @onclick="CancelAction">Cancel</button>
+                </div>
+                @if (!string.IsNullOrWhiteSpace(_actionMessage))
+                {
+                    <div>@_actionMessage</div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (_showMemberManagement)
+    {
+        <div style="margin-top:12px;padding:10px;border:1px solid #ccc;max-width:800px;">
+            <div style="font-weight:600">Manage Members - @_actionTargetName</div>
+            
+            <div style="margin-top:12px;">
+                <div style="font-weight:600;margin-bottom:6px;">Add Members:</div>
+                <select @bind="_selectedPlayerToAdd" style="margin-right:8px;">
+                    <option value="">Select player to add</option>
+                    @foreach (var player in _availablePlayers.Where(p => _groupMembers?.Any(m => m.UserId == p.Id) != true))
+                    {
+                        <option value="@player.Id">@player.Name</option>
+                    }
+                </select>
+                <button @onclick="AddMember">Add</button>
+                @if (!string.IsNullOrWhiteSpace(_memberMessage))
+                {
+                    <div style="margin-top:4px;color:green;">@_memberMessage</div>
+                }
+            </div>
+
+            <div style="margin-top:16px;">
+                <div style="font-weight:600;margin-bottom:6px;">Current Members:</div>
+                @if (_groupMembers?.Any() == true)
+                {
+                    <table style="border-collapse:collapse;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Player</th>
+                                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Joined</th>
+                                <th style="text-align:left;padding:4px 8px;border-bottom:1px solid #ccc;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var member in _groupMembers)
+                            {
+                                <tr>
+                                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">@member.User?.Name</td>
+                                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">@member.JoinedAtUtc.ToString("yyyy-MM-dd")</td>
+                                    <td style="padding:4px 8px;border-bottom:1px solid #eee;">
+                                        @if (member.UserId != _selectedGroupId && member.User?.Name != null)
+                                        {
+                                            <button @onclick="@(() => RemoveMember(member.UserId, member.User?.Name ?? "Unknown"))">Remove</button>
+                                        }
+                                        else
+                                        {
+                                            <span style="color:#666;">Owner</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                }
+                else
+                {
+                    <p style="color:#666;">No members yet</p>
+                }
+            </div>
+
+            <div style="margin-top:12px;">
+                <button @onclick="CloseMemberManagement">Done</button>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string _groupName = "";
+    private string _groupDescription = "";
+    private int _selectedOwnerId = 0;
+    private string _message = "";
+
+    private List<Group>? _groups;
+    private List<AppUser> _availablePlayers = new();
+    private List<GroupMember>? _groupMembers;
+
+    private int? _actionTargetId;
+    private string _actionTargetName = "";
+    private string _adminPin = "";
+    private bool _confirm = false;
+    private string _actionTitle = "";
+    private string _actionMessage = "";
+    private string _actionKind = "";
+
+    private bool _showMemberManagement = false;
+    private int _selectedGroupId = 0;
+    private int _selectedPlayerToAdd = 0;
+    private string _memberMessage = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        _groups = await Auth.ListGroupsAsync();
+        _availablePlayers = await Auth.ListPlayersAsync();
+    }
+
+    private async Task OnCreateGroup()
+    {
+        _message = "";
+        
+        if (string.IsNullOrWhiteSpace(_groupName))
+        {
+            _message = "Group name is required.";
+            return;
+        }
+
+        if (_selectedOwnerId <= 0)
+        {
+            _message = "Please select a group owner.";
+            return;
+        }
+
+        var group = await Auth.CreateGroupAsync(_groupName.Trim(), _groupDescription?.Trim(), _selectedOwnerId);
+        if (group is null)
+        {
+            _message = "Unable to create group (name may already exist).";
+            return;
+        }
+
+        _message = $"Group '{group.Name}' created.";
+        _groupName = "";
+        _groupDescription = "";
+        _selectedOwnerId = 0;
+
+        await LoadData();
+    }
+
+    private void SelectManageMembers(int groupId, string groupName)
+    {
+        _actionTargetId = groupId;
+        _actionTargetName = groupName;
+        _showMemberManagement = true;
+        _selectedGroupId = groupId;
+        _memberMessage = "";
+        
+        _ = Task.Run(async () =>
+        {
+            _groupMembers = await Auth.GetGroupMembersAsync(groupId);
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private void CloseMemberManagement()
+    {
+        _showMemberManagement = false;
+        _actionTargetId = null;
+        _actionTargetName = "";
+        _groupMembers = null;
+        _selectedPlayerToAdd = 0;
+    }
+
+    private async Task AddMember()
+    {
+        if (_selectedPlayerToAdd <= 0 || !_actionTargetId.HasValue) return;
+
+        var success = await Auth.AddGroupMemberAsync(_actionTargetId.Value, _selectedPlayerToAdd);
+        if (success)
+        {
+            _memberMessage = "Member added successfully.";
+            _selectedPlayerToAdd = 0;
+            _groupMembers = await Auth.GetGroupMembersAsync(_actionTargetId.Value);
+        }
+        else
+        {
+            _memberMessage = "Failed to add member (may already be in group).";
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RemoveMember(int userId, string userName)
+    {
+        if (!_actionTargetId.HasValue) return;
+
+        var success = await Auth.RemoveGroupMemberAsync(_actionTargetId.Value, userId);
+        if (success)
+        {
+            _groupMembers = await Auth.GetGroupMembersAsync(_actionTargetId.Value);
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void SelectDelete(int groupId, string groupName)
+    {
+        _actionKind = "delete";
+        _actionTargetId = groupId;
+        _actionTargetName = groupName;
+        _actionTitle = "Delete group";
+        _actionMessage = "";
+        _adminPin = "";
+        _confirm = false;
+    }
+
+    private void CancelAction()
+    {
+        _actionKind = "";
+        _actionTargetId = null;
+        _actionTargetName = "";
+        _actionTitle = "";
+        _actionMessage = "";
+        _adminPin = "";
+        _confirm = false;
+    }
+
+    private async Task ExecuteAction()
+    {
+        _actionMessage = "";
+
+        if (!_actionTargetId.HasValue)
+        {
+            _actionMessage = "No target selected.";
+            return;
+        }
+
+        if (!_confirm)
+        {
+            _actionMessage = "You must confirm.";
+            return;
+        }
+
+        var adminUserId = GetCurrentUserId();
+        if (!adminUserId.HasValue)
+        {
+            _actionMessage = "No admin player id.";
+            return;
+        }
+
+        var pin = (_adminPin ?? "").Trim();
+        var ok = false;
+
+        if (_actionKind == "delete")
+        {
+            ok = await Auth.DeleteGroupAsync(_actionTargetId.Value, adminUserId.Value, pin);
+        }
+        else
+        {
+            _actionMessage = "Unknown action.";
+            return;
+        }
+
+        _actionMessage = ok ? "Done." : "Failed (check admin PIN).";
+        await LoadData();
+    }
+
+    private int? GetCurrentUserId()
+    {
+        var user = HttpContextAccessor.HttpContext?.User;
+        var raw = user?.FindFirst("uid")?.Value;
+        return int.TryParse(raw, out var id) ? id : null;
+    }
+}

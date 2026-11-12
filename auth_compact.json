@@ -1,0 +1,42 @@
+{
+  "exportDate": "2026-03-16T03:26:12.0962439Z",
+  "users": [
+    { "id": 1, "name": "Admin", "roles": "Admin,Player", "pin": "9999", "groups": [] },
+    { "id": 5, "name": "Alice", "roles": "Player", "pin": "9999", "groups": ["Ted-Alice"] },
+    { "id": 2, "name": "Bob", "roles": "Player", "pin": "9999", "groups": ["Bob-Carol"] },
+    { "id": 3, "name": "Carol", "roles": "Player", "pin": "9999", "groups": ["Bob-Carol"] },
+    { "id": 6, "name": "Fred", "roles": "Player", "pin": "9999", "groups": [] },
+    { "id": 4, "name": "Ted", "roles": "Player", "pin": "9999", "groups": ["Ted-Alice"] }
+  ],
+  "groups": [
+    {
+      "id": 1,
+      "name": "Bob-Carol",
+      "description": "Bob and Carol's group",
+      "ownerId": 2,
+      "members": [ "Bob", "Carol" ]
+    },
+    {
+      "id": 2,
+      "name": "Ted-Alice",
+      "description": "Ted and Alice's group",
+      "ownerId": 5,
+      "members": [ "Alice", "Ted" ]
+    },
+    {
+      "id": 6,
+      "name": "Fred",
+      "roles": "Player",
+      "pin": "9999",
+      "groups": []
+    },
+    {
+      "id": 4,
+      "name": "Ted",
+      "roles": "Player",
+      "pin": "9999",
+      "groups": [ "Ted-Alice" ]
+    }
+
+  ]
+}

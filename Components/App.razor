@@ -1,0 +1,53 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <base href="/" />
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["WalkieTalkie.styles.css"]" />
+    <ImportMap />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes @rendermode="@(new InteractiveServerRenderMode(prerender: false))" />
+    <ReconnectModal />
+    <script src="js/walkieTalkie.js"></script>
+    <script>
+        window.WalkieTalkieAuth = window.WalkieTalkieAuth || {
+            getContextId: function () {
+                try { return sessionStorage.getItem('walkietalkieContextId') || ''; } catch { return ''; }
+            },
+            setContextId: function (value) {
+                try { sessionStorage.setItem('walkietalkieContextId', value || ''); } catch { }
+            },
+            clearContextId: function () {
+                try { sessionStorage.removeItem('walkietalkieContextId'); } catch { }
+            }
+        };
+
+        function downloadFile(fileName, base64Data) {
+            const byteCharacters = atob(base64Data);
+            const byteNumbers = new Array(byteCharacters.length);
+            for (let i = 0; i < byteCharacters.length; i++) {
+                byteNumbers[i] = byteCharacters.charCodeAt(i);
+            }
+            const byteArray = new Uint8Array(byteNumbers);
+            const blob = new Blob([byteArray], { type: 'application/octet-stream' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+    <script src="@Assets["_framework/blazor.server.js"]"></script>
+</body>
+
+</html>

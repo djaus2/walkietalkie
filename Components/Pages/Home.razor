@@ -1,0 +1,99 @@
+﻿@page "/"
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@using WalkieTalkie.Services
+@using System.Text.Json
+@using Microsoft.AspNetCore.Components.Authorization
+@inject NavigationManager Nav
+@inject SettingsService Settings
+@inject AuthenticationStateProvider AuthStateProvider
+@inject Microsoft.JSInterop.IJSRuntime JSRuntime
+@inject IHttpContextAccessor HttpContextAccessor
+
+<PageTitleHeading Title="@($"WalkieTalkie online V{Version}")" HeadingLevel="2" />
+
+<br />
+
+<p>Walkie-talkie style chat with a friend online — text chat plus hold-to-talk voice.</p>
+
+@if (!_isAuthenticated)
+{
+    <a href="/login" role="button" style="display:inline-block;padding:6px 12px;border-radius:4px;border:1px solid #888;background:#f3f3f3;color:inherit;text-decoration:none;">Login to chat</a>
+}
+else
+{
+    <a href="@(_isAdmin ? "/admin" : "/player")" role="button" style="display:inline-block;padding:6px 12px;border-radius:4px;border:1px solid #888;background:#f3f3f3;color:inherit;text-decoration:none;">Continue</a>
+}
+
+<br />
+<br />
+
+<div style="max-width:400px;padding:12px;border:1px solid #ccc;background-color:lightgreen;">
+    <h4 style="margin-top:0;"><font color="blue">Session Settings</font></h4>
+    <div style="font-size:14px;line-height:1.6;">
+        <div><strong>Max login session:</strong> @_maxLoginHrs hours</div>
+    </div>
+</div>
+
+<div style="max-width:400px;padding:12px;border:1px solid #ccc;background-color:beige">
+    <h4 style="margin-top:0;"><font color="purple">Players and Chat</font></h4>
+    <div style="font-size:14px;line-height:1.6;">
+        <div><strong>Players: </strong>Bob, Ted, Carol and Alice </div>
+        <div><strong>Pin for login: </strong>All pins are 9999</div>
+        <div><strong>Group Bob-Carol: </strong>Bob and Carol can chat</div>
+        <div><strong>Group Ted-Alice: </strong>Ted and Alice can chat</div>
+        <div><strong><i>When two group members are logged in they can text and talk</i></strong> </div>
+        <div><strong><i>New: </i><font color="red">Fred,John,Harry,Mary,Sue,Libby</font> all in <font color="purple">Global</font> Group</strong></div>
+    </div>
+</div>
+
+<div style="max-width:400px;padding:12px;border:1px solid #ccc;background-color:pink">
+    <h4 style="margin-top:0;"><font color="purple">Walkie-talkie voice</font></h4>
+    <div style="font-size:14px;line-height:1.6;">
+        <div><strong>Hold the Talk button</strong> and speak. Your speech is sent as a voice message.</div>
+        <div><strong>The other person</strong> hears it spoken aloud in your chosen voice.</div>
+        <div>Pick your voice under <i>Voice</i> on the player page (desktop browsers).</div>
+    </div>
+</div>
+
+@code{
+    private int _maxLoginHrs = 4;
+    private bool _isAuthenticated = false;
+    private bool _isAdmin = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _maxLoginHrs = await Settings.GetMaxLoginHrsAsync();
+
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isAuthenticated = user?.Identity?.IsAuthenticated == true;
+        _isAdmin = _isAuthenticated && user!.IsInRole("Admin");
+    }
+
+    private string Version
+    {
+        get
+        {
+            try
+            {
+                // Read version from auth.json
+                var jsonPath = Path.Combine(Directory.GetCurrentDirectory(), "auth.json");
+                if (File.Exists(jsonPath))
+                {
+                    var jsonContent = File.ReadAllText(jsonPath);
+                    using var document = JsonDocument.Parse(jsonContent);
+                    if (document.RootElement.TryGetProperty("version", out var versionElement))
+                    {
+                        return versionElement.GetString() ?? "1.0.0";
+                    }
+                }
+            }
+            catch
+            {
+                // Fallback if JSON reading fails
+            }
+            return "1.0.0"; // Fallback version
+        }
+    }
+
+}

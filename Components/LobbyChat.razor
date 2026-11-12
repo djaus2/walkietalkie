@@ -1,0 +1,838 @@
+@implements IDisposable
+@using WalkieTalkie.Services
+@using System.Linq
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.AspNetCore.Components
+@inject LobbyChatService LobbyChatSvc
+@inject VoiceLobbyService VoiceLobby
+@inject IHttpContextAccessor HttpContextAccessor
+@inject Microsoft.JSInterop.IJSRuntime JS
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<div style="margin-top:18px;max-width:520px;">
+    <div class="rainbow-heading" style="margin:0;font-weight:800;letter-spacing:0.5px;font-size:18px;line-height:1.1;display:flex;align-items:center;gap:10px;">
+        <span>Lobby Chat</span>
+        <button type="button" @onclick="ClearMyChat" title="Clear chat only for you">Clear My Chat</button>
+        @if (_isAdmin)
+        {
+            <button type="button" @onclick="ToggleBroadcastMode" style="background:#ff6b6b;color:white;border:none;padding:2px 8px;border-radius:4px;font-size:12px;">
+                @(_broadcastMode ? "Normal Chat" : "Broadcast")
+            </button>
+        }
+    </div>
+
+    @if (!_dataLoaded)
+    {
+        <div style="padding:20px;text-align:center;color:#666;border:1px solid #ddd;background:#f9f9f9;">
+            <div style="font-weight:bold;margin-bottom:8px;">Loading chat...</div>
+        </div>
+    }
+    else if (_userGroups?.Any() == true || _isAdmin)
+    {
+        <textarea @ref="_chatInRef" rows="6" style="width:100%;resize:none;" readonly>@_chatInText</textarea>
+        <div class="rainbow-heading" style="margin:0;font-weight:800;letter-spacing:0.5px;font-size:18px;line-height:1.1;display:flex;align-items:center;gap:10px;">
+            <span>@(_broadcastMode ? "Broadcast to All" : "Send")</span>
+            @if (_broadcastMode && _isAdmin)
+            {
+                <span style="font-size:12px;color:#ff6b6b;font-weight:normal;">Admin Mode</span>
+            }
+            <button type="button" @onclick="ToggleHideVoiceInChat"
+                    title="@(_hideVoiceInChat ? "Voice messages hidden from chat" : "Voice messages shown in chat")"
+                    style="font-size:12px;">
+                @if (_hideVoiceInChat)
+                {
+                    <span>Show Talk Txt</span>
+                }
+                else
+                {
+                    <span>Hide Talk Txt</span>
+                }
+            </button>
+        </div>
+        <textarea @ref="_chatOutRef" rows="3" style="width:100%;resize:none;" placeholder="@(_broadcastMode ? "Broadcast message to all logged-in players..." : "Type message and press Enter")"
+                  @bind-value="_chatOutText" @bind-value:event="oninput"
+                  ></textarea>
+
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
+            <button type="button" class="walkie-voice-button" disabled="@(!CanPressToTalk)"
+                    @onpointerdown="OnTalkPointerDown"
+                    @onpointerup="OnTalkPointerUp"
+                    @onpointercancel="OnTalkPointerCancel"
+                    @onpointerleave="OnTalkPointerLeave"
+                    style="touch-action:none;user-select:none;-webkit-user-select:none;min-width:110px;padding:10px 14px;">
+                @if (IsVoiceMuted)
+                {
+                    <span>Muted</span>
+                }
+                else
+                {
+                    <span>@TalkButtonText</span>
+                }
+            </button>
+            <button type="button" class="walkie-voice-button" @onclick="ToggleMute"
+                    disabled="@(IsVoiceMuted && !CanUnmute)"
+                    title="@MuteButtonTitle"
+                    style="padding:10px 14px;">
+                @if (IsVoiceMuted)
+                {
+                    <span>Unmute</span>
+                }
+                else
+                {
+                    <span>Mute</span>
+                }
+            </button>
+        </div>
+        @if (IsVoiceMuted && !string.IsNullOrWhiteSpace(VoiceLobby.VoiceMutedByUserName))
+        {
+            <span style="font-size:14px;color:red">Muted by @VoiceLobby.VoiceMutedByUserName</span>
+        }
+        <p style="margin-top:8px;font-size:13px;color:#555;">@_voiceStatus@(!string.IsNullOrWhiteSpace(_ttsStatus) ? (" " + _ttsStatus) : "")</p>
+    }
+    else
+    {
+        <div style="padding:20px;text-align:center;color:#666;border:1px solid #ddd;background:#f9f9f9;">
+            <div style="font-weight:bold;margin-bottom:8px;">Chat Access Required</div>
+            <div style="font-size:14px;">You must be a member of at least one group to participate in lobby chat.</div>
+            <div style="font-size:12px;margin-top:8px;">Contact an administrator to be added to a group.</div>
+        </div>
+    }
+</div>
+
+<script>
+  window.lobbyChat = window.lobbyChat || {};
+  window.lobbyChat.scrollToBottom = function (el) {
+    try {
+      if (!el) return;
+      el.scrollTop = el.scrollHeight;
+    } catch (e) {
+    }
+  };
+
+  window.lobbyChat.wireEnterToSend = function (el, dotNetRef) {
+    try {
+      if (!el || !dotNetRef) return;
+      if (el.__lobbyEnterWired) return;
+      el.__lobbyEnterWired = true;
+      el.addEventListener('keydown', function (ev) {
+        try {
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            dotNetRef.invokeMethodAsync('OnChatEnterFromJs');
+          }
+        } catch (e) {
+        }
+      });
+    } catch (e) {
+    }
+  };
+</script>
+
+@code {
+    private const string VoicePrefix = "[VOICE] ";
+
+    private ElementReference _chatInRef;
+    private ElementReference _chatOutRef;
+
+    private string _chatInText = "";
+    private string _chatOutText = "";
+    private int _lastChatCount;
+    private bool _scrollPending;
+    private DotNetObjectReference<LobbyChat>? _dotNetRef;
+    private List<WalkieTalkie.Data.Group>? _userGroups;
+    private int? _currentUserId;
+    private string _currentUserName = "";
+    private bool _isAdmin;
+    private bool _broadcastMode;
+    private bool _dataLoaded = false;
+    private IReadOnlyList<LobbyChatService.ChatMessage> _visibleMessages = new List<LobbyChatService.ChatMessage>();
+
+    // Voice (walkie-talkie) state
+    private bool _talkEnabled;
+    private bool _voiceSupported;
+    private bool _voiceSupportChecked;
+    private bool _hideVoiceInChat = true;
+    private string _voiceStatus = "";
+    private string _ttsStatus = "";
+    private int _ttsStatusVersion;
+    private bool _pttHeld;
+    private bool _isPhoneClient;
+    private int _voiceSpeakCursor;
+    private bool _voiceSpeakCursorSet;
+    private DotNetObjectReference<LobbyChat>? _voiceDotNetRef;
+    private System.Threading.Timer? _voiceHoldRenewTimer;
+    private System.Threading.Timer? _uiTimer;
+
+    [Parameter]
+    public int? CurrentUserId { get; set; }
+
+    [Parameter]
+    public bool OtherUserOnline { get; set; }
+
+    private bool IsVoiceFloorHeldByOther
+    {
+        get
+        {
+            if (!VoiceLobby.VoiceFloorUserId.HasValue) return false;
+            if (VoiceLobby.VoiceFloorUserId.Value == _currentUserId) return false;
+            if (!VoiceLobby.VoiceFloorUntilUtc.HasValue) return false;
+            return VoiceLobby.VoiceFloorUntilUtc.Value > DateTime.UtcNow;
+        }
+    }
+
+    private bool IsVoiceMuted => VoiceLobby.VoiceMuted;
+
+    private bool CanUnmute => VoiceLobby.VoiceMutedByUserId == _currentUserId;
+
+    private bool CanPressToTalk => _voiceSupported && _talkEnabled && OtherUserOnline && !_pttHeld && !IsVoiceFloorHeldByOther && !IsVoiceMuted;
+
+    private string TalkButtonText
+    {
+        get
+        {
+            if (!_voiceSupportChecked) return "Talk";
+            if (!_voiceSupported) return "Talk not supported";
+            if (!_talkEnabled) return "Talk";
+            if (IsVoiceMuted) return "Muted";
+            if (!OtherUserOnline) return "Talk";
+            if (_pttHeld) return "Talking…";
+            if (IsVoiceFloorHeldByOther) return "Other talking…";
+            return "Talk";
+        }
+    }
+
+    private string MuteButtonTitle
+    {
+        get
+        {
+            if (!IsVoiceMuted) return "Mute voice for everyone";
+            if (CanUnmute) return "Unmute voice";
+            return $"Muted by {VoiceLobby.VoiceMutedByUserName ?? "other user"} - only they can unmute";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUserData();
+        RefreshChat();
+        LobbyChatSvc.ChatUpdated += OnChatUpdated;
+        VoiceLobby.StateChanged += OnVoiceStateChanged;
+
+        // Periodic UI refresh so a stale/expired voice floor clears itself.
+        _uiTimer = new System.Threading.Timer(_ =>
+        {
+            try
+            {
+                UpdateVoiceStatus();
+                _ = InvokeAsync(StateHasChanged);
+            }
+            catch
+            {
+            }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Reload data when parameters change
+        await LoadUserData();
+        RefreshChat();
+        UpdateVoiceStatus();
+    }
+
+    public void Dispose()
+    {
+        LobbyChatSvc.ChatUpdated -= OnChatUpdated;
+        VoiceLobby.StateChanged -= OnVoiceStateChanged;
+        _dotNetRef?.Dispose();
+        _voiceDotNetRef?.Dispose();
+
+        try
+        {
+            _uiTimer?.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            _voiceHoldRenewTimer?.Dispose();
+        }
+        catch
+        {
+        }
+
+        try
+        {
+            if (_pttHeld && _currentUserId.HasValue && _currentUserId.Value > 0)
+            {
+                VoiceLobby.ReleaseVoiceFloor(_currentUserId.Value);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private void OnChatUpdated()
+    {
+        RefreshChat();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnVoiceStateChanged()
+    {
+        UpdateVoiceStatus();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadUserData()
+    {
+        // Clear chat display when loading user data (login/refresh)
+        _chatInText = "";
+        _chatOutText = "";
+        _lastChatCount = 0;
+        _voiceSpeakCursorSet = false;
+        _scrollPending = false;
+        _dataLoaded = false;
+
+        // Use the CurrentUserId passed from Player.razor
+        _currentUserId = CurrentUserId;
+
+        var user = HttpContextAccessor.HttpContext?.User;
+        _isAdmin = user?.IsInRole("Admin") ?? false;
+        _currentUserName = user?.Identity?.Name ?? "";
+
+        if (_currentUserId.HasValue)
+        {
+            // Clear user's personal chat view to ensure fresh start on login
+            LobbyChatSvc.ClearChatForUser(_currentUserId.Value);
+
+            // Load user groups
+            try
+            {
+                _userGroups = await Auth.GetUserGroupsAsync(_currentUserId.Value);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LobbyChat: Error loading groups for user {_currentUserId}: {ex.Message}");
+                _userGroups = new List<WalkieTalkie.Data.Group>();
+            }
+
+            if (string.IsNullOrWhiteSpace(_currentUserName))
+            {
+                try
+                {
+                    var appUser = await Auth.GetUserByIdAsync(_currentUserId.Value);
+                    _currentUserName = appUser?.Name ?? "";
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        _dataLoaded = true;
+
+        // Refresh chat after data is loaded to apply proper filtering
+        RefreshChat();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void RefreshChat()
+    {
+        var userGroupIds = _userGroups?.Select(g => g.Id) ?? Enumerable.Empty<int>();
+        var msgs = LobbyChatSvc.GetMessages(_currentUserId, userGroupIds);
+        _visibleMessages = msgs;
+        var count = msgs.Count;
+        if (count != _lastChatCount)
+        {
+            var priorCount = _lastChatCount;
+            _lastChatCount = count;
+
+            var hideVoice = _hideVoiceInChat;
+            _chatInText = string.Join("\n", msgs
+                .Where(m => !hideVoice || !m.Text.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase))
+                .Select(m => $"{m.SenderName}: {m.Text}"));
+            _scrollPending = true;
+
+            // If the visible list shrank (chat cleared/trimmed), resync the speak cursor.
+            if (_voiceSpeakCursor > count) _voiceSpeakCursor = 0;
+
+            if (_voiceSpeakCursorSet && _talkEnabled)
+            {
+                _ = QueueSpeakNewVoiceMessages(Math.Max(priorCount, _voiceSpeakCursor));
+            }
+            else
+            {
+                // First load after login: mark all existing messages as seen so the backlog is not spoken.
+                _voiceSpeakCursor = count;
+            }
+            _voiceSpeakCursorSet = true;
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                _dotNetRef ??= DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("lobbyChat.wireEnterToSend", _chatOutRef, _dotNetRef);
+            }
+            catch
+            {
+            }
+
+            try
+            {
+                await JS.InvokeAsync<bool>("WalkieTalkieVoice.installTtsUnlocker");
+                _voiceSupported = await JS.InvokeAsync<bool>("WalkieTalkieVoice.isSupported");
+                _voiceSupportChecked = true;
+                _talkEnabled = _voiceSupported;
+
+                try
+                {
+                    _isPhoneClient = await JS.InvokeAsync<bool>("WalkieTalkieVoice.isProbablyPhone");
+                }
+                catch
+                {
+                    _isPhoneClient = false;
+                }
+
+                UpdateVoiceStatus();
+                await InvokeAsync(StateHasChanged);
+            }
+            catch
+            {
+                _voiceSupported = false;
+                _voiceSupportChecked = true;
+                _voiceStatus = "Talk not supported";
+            }
+        }
+
+        if (_scrollPending)
+        {
+            _scrollPending = false;
+            try
+            {
+                await JS.InvokeVoidAsync("lobbyChat.scrollToBottom", _chatInRef);
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    private void UpdateVoiceStatus()
+    {
+        if (!_voiceSupportChecked)
+        {
+            _voiceStatus = "";
+            return;
+        }
+
+        if (!_voiceSupported)
+        {
+            _voiceStatus = "Talk not supported in this browser";
+            return;
+        }
+
+        if (!_talkEnabled)
+        {
+            _voiceStatus = "Talk is off";
+            return;
+        }
+
+        if (IsVoiceMuted)
+        {
+            _voiceStatus = "Voice muted";
+            return;
+        }
+
+        if (_pttHeld)
+        {
+            _voiceStatus = "Talking…";
+            return;
+        }
+
+        if (IsVoiceFloorHeldByOther)
+        {
+            var name = VoiceLobby.VoiceFloorUserName;
+            _voiceStatus = string.IsNullOrWhiteSpace(name) ? "Other talking…" : $"{name} talking…";
+            return;
+        }
+
+        if (!OtherUserOnline)
+        {
+            _voiceStatus = "Hold to talk (enabled when someone else is online)";
+            return;
+        }
+
+        _voiceStatus = "Hold to talk";
+    }
+
+    private void ToggleHideVoiceInChat()
+    {
+        _hideVoiceInChat = !_hideVoiceInChat;
+        _lastChatCount = 0; // force re-render of the chat text
+        RefreshChat();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleMute()
+    {
+        if (!_currentUserId.HasValue) return;
+        var (ok, msg) = VoiceLobby.ToggleVoiceMute(_currentUserId.Value, _currentUserName);
+        if (!ok && !string.IsNullOrWhiteSpace(msg))
+        {
+            _voiceStatus = msg;
+        }
+        UpdateVoiceStatus();
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendChatMessage()
+    {
+        if (!_currentUserId.HasValue) return;
+
+        // Get user name from database instead of HttpContext
+        var senderName = await GetUserNameById(_currentUserId.Value);
+
+        var senderId = _currentUserId.Value;
+        var userGroupIds = _userGroups?.Select(g => g.Id) ?? Enumerable.Empty<int>();
+        var text = _chatOutText.Trim();
+        if (string.IsNullOrWhiteSpace(text)) return;
+
+        // Handle admin broadcast
+        if (_broadcastMode && _isAdmin)
+        {
+            var broadcastOk = LobbyChatSvc.AddAdminBroadcastWithGroupCheck(senderId, senderName, text, userGroupIds, _isAdmin);
+            if (broadcastOk)
+            {
+                _chatOutText = "";
+            }
+            return;
+        }
+
+        // Send message to all groups the user is a member of
+        var messageSent = false;
+        foreach (var groupId in userGroupIds)
+        {
+            var success = LobbyChatSvc.AddMessageWithGroupCheck(senderId, senderName, text, userGroupIds, groupId);
+            if (success) messageSent = true;
+        }
+
+        var ok = messageSent;
+        if (ok)
+        {
+            _chatOutText = "";
+            _scrollPending = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("alert", "Failed to send message. You may not have permission for this group.");
+            }
+            catch
+            {
+                // If alert fails, silently fail
+            }
+        }
+    }
+
+    private async Task<string> GetUserNameById(int userId)
+    {
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(_currentUserName))
+            {
+                return _currentUserName;
+            }
+
+            // Fallback: Get from database using AuthService
+            var appUser = await Auth.GetUserByIdAsync(userId);
+            if (appUser != null)
+            {
+                return appUser.Name;
+            }
+
+            return $"User{userId}"; // Fallback display name
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"LobbyChat: Error getting user name for ID {userId}: {ex.Message}");
+            return $"User{userId}"; // Fallback display name
+        }
+    }
+
+    private void ToggleBroadcastMode()
+    {
+        _broadcastMode = !_broadcastMode;
+        _chatOutText = ""; // Clear input when switching modes
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task ClearMyChat()
+    {
+        if (!_currentUserId.HasValue) return;
+
+        try
+        {
+            var ok = await JS.InvokeAsync<bool>("confirm", "This will clear chat only for you. Continue?");
+            if (!ok) return;
+        }
+        catch
+        {
+            // If confirm fails for any reason, don't clear.
+            return;
+        }
+
+        LobbyChatSvc.ClearChatForUser(_currentUserId.Value);
+        _lastChatCount = 0;
+        _voiceSpeakCursor = 0;
+        _chatInText = "";
+        _scrollPending = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnChatEnterFromJs()
+    {
+        await SendChatMessage();
+    }
+
+    // ---------------- Walkie-talkie voice (speech-to-text -> chat -> TTS) ----------------
+
+    private async Task OnTalkPointerDown()
+    {
+        if (!_voiceSupported) return;
+        if (!_talkEnabled) return;
+        if (!OtherUserOnline) return;
+        if (_pttHeld) return;
+        if (IsVoiceFloorHeldByOther) return;
+
+        _pttHeld = true;
+        _voiceStatus = "Talking…";
+
+        if (_currentUserId.HasValue && _currentUserId.Value > 0)
+        {
+            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName);
+        }
+
+        _voiceDotNetRef ??= DotNetObjectReference.Create(this);
+
+        try
+        {
+            await JS.InvokeAsync<bool>("WalkieTalkieVoice.start", _voiceDotNetRef);
+        }
+        catch
+        {
+        }
+
+        _voiceHoldRenewTimer?.Dispose();
+        _voiceHoldRenewTimer = new System.Threading.Timer(_ =>
+        {
+            if (!_pttHeld) return;
+            if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return;
+            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName);
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnTalkPointerUp()
+    {
+        if (!_pttHeld) return;
+        _pttHeld = false;
+
+        _voiceHoldRenewTimer?.Dispose();
+        _voiceHoldRenewTimer = null;
+
+        if (_currentUserId.HasValue && _currentUserId.Value > 0)
+        {
+            VoiceLobby.ReleaseVoiceFloor(_currentUserId.Value);
+        }
+
+        try
+        {
+            await JS.InvokeAsync<bool>("WalkieTalkieVoice.stop");
+        }
+        catch
+        {
+        }
+
+        UpdateVoiceStatus();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnTalkPointerCancel()
+    {
+        await OnTalkPointerUp();
+    }
+
+    private async Task OnTalkPointerLeave()
+    {
+        await OnTalkPointerUp();
+    }
+
+    [JSInvokable]
+    public Task OnVoiceTranscript(string text)
+    {
+        // Note: _pttHeld may already be false since JS flush is delayed after button release
+        if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return Task.CompletedTask;
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        if (VoiceLobby.VoiceMuted) return Task.CompletedTask;
+
+        var clean = text.Trim();
+        var userGroupIds = _userGroups?.Select(g => g.Id) ?? Enumerable.Empty<int>();
+        var senderName = _currentUserName;
+        if (string.IsNullOrWhiteSpace(senderName)) senderName = $"User{_currentUserId.Value}";
+
+        // Voice transcripts ride the normal group chat with a [VOICE] prefix so
+        // other logged-in users in the same group(s) receive and speak them.
+        foreach (var groupId in userGroupIds)
+        {
+            LobbyChatSvc.AddMessageWithGroupCheck(_currentUserId.Value, senderName, VoicePrefix + clean, userGroupIds, groupId);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    [JSInvokable]
+    public Task OnVoiceError(string error)
+    {
+        var text = (error ?? string.Empty).Trim();
+        _voiceStatus = string.IsNullOrWhiteSpace(text)
+            ? "Mic error"
+            : $"Mic error: {text}";
+        return InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public Task OnVoiceEnded()
+    {
+        return Task.CompletedTask;
+    }
+
+    private async Task QueueSpeakNewVoiceMessages(int fromIndex)
+    {
+        if (!_talkEnabled) return;
+        if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return;
+        if (VoiceLobby.VoiceMuted) return;
+
+        if (fromIndex < 0) fromIndex = 0;
+
+        var messages = _visibleMessages;
+        if (fromIndex >= messages.Count) return;
+
+        // Mark everything as seen up-front so rapid successive updates do not double-speak.
+        _voiceSpeakCursor = messages.Count;
+
+        _ = InvokeAsync(async () =>
+        {
+            try
+            {
+                await JS.InvokeAsync<bool>("WalkieTalkieVoice.unlockTts");
+            }
+            catch
+            {
+            }
+
+            for (var i = Math.Max(0, fromIndex); i < messages.Count; i++)
+            {
+                var m = messages[i];
+                if (m is null) continue;
+                if (m.SenderUserId == _currentUserId.Value) continue;
+
+                var t = m.Text ?? string.Empty;
+                if (!t.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase)) continue;
+
+                var payload = t.Substring(VoicePrefix.Length).Trim();
+                if (string.IsNullOrWhiteSpace(payload)) continue;
+
+                string? voiceKey = null;
+                string? voiceLanguage = null;
+                string? voiceRegion = null;
+
+                if (!_isPhoneClient)
+                {
+                    try
+                    {
+                        var senderUser = await Auth.GetUserByIdAsync(m.SenderUserId);
+                        if (senderUser is not null)
+                        {
+                            voiceKey = !string.IsNullOrWhiteSpace(senderUser.PreferredTtsVoice)
+                                ? senderUser.PreferredTtsVoice
+                                : senderUser.AdminDesktopFallbackTtsVoice;
+                            voiceLanguage = !string.IsNullOrWhiteSpace(senderUser.PreferredTtsLanguage)
+                                ? senderUser.PreferredTtsLanguage
+                                : senderUser.AdminDesktopFallbackTtsLanguage;
+                            voiceRegion = !string.IsNullOrWhiteSpace(senderUser.PreferredTtsRegion)
+                                ? senderUser.PreferredTtsRegion
+                                : senderUser.AdminDesktopFallbackTtsRegion;
+                        }
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (!_talkEnabled) break;
+                if (VoiceLobby.VoiceMuted) break;
+
+                try
+                {
+                    var voiceLabel = _isPhoneClient
+                        ? await JS.InvokeAsync<string>("WalkieTalkieVoice.speakDefaultAndDescribe", payload)
+                        : await JS.InvokeAsync<string>("WalkieTalkieVoice.speakAndDescribe", payload, voiceKey, voiceLanguage, voiceRegion);
+                    if (string.IsNullOrWhiteSpace(voiceLabel)) voiceLabel = "Default voice";
+
+                    var usedDefaultVoice = voiceLabel.StartsWith("Default voice", StringComparison.OrdinalIgnoreCase);
+
+                    _ttsStatusVersion++;
+                    var v = _ttsStatusVersion;
+                    _ttsStatus = usedDefaultVoice
+                        ? "Speaking: Default"
+                        : $"Speaking: {voiceLabel}";
+                    await InvokeAsync(StateHasChanged);
+
+                    _ = InvokeAsync(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(20000);
+                            if (_ttsStatusVersion != v) return;
+                            _ttsStatus = "";
+                            await InvokeAsync(StateHasChanged);
+                        }
+                        catch
+                        {
+                        }
+                    });
+                }
+                catch
+                {
+                    var ok = _isPhoneClient
+                        ? await JS.InvokeAsync<bool>("WalkieTalkieVoice.speakDefault", payload)
+                        : await JS.InvokeAsync<bool>("WalkieTalkieVoice.speak", payload, voiceKey, voiceLanguage, voiceRegion);
+                    _ = ok;
+                }
+
+                try
+                {
+                    UpdateVoiceStatus();
+                    await InvokeAsync(StateHasChanged);
+                }
+                catch
+                {
+                }
+            }
+        });
+    }
+}
