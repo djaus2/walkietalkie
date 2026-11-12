@@ -63,25 +63,26 @@ public sealed class AuthService
     }
 
     public Task<List<AppUser>> ListUsersAsync()
-        => _db.Users.OrderBy(x => x.Name).ToListAsync();
+        => _db.Users.AsNoTracking().OrderBy(x => x.Name).ToListAsync();
 
     public async Task<List<AppUser>> ListAdminUsersAsync()
     {
         return await _db.Users
+            .AsNoTracking()
             .Where(x => x.Roles != null && x.Roles.Split(',').Contains("Admin"))
             .OrderBy(x => x.Name)
             .ToListAsync();
     }
 
     public Task<AppUser?> GetUserByIdAsync(int userId)
-        => _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        => _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
 
     public Task<AppUser?> GetUserByNameAsync(string name)
-        => _db.Users.SingleOrDefaultAsync(x => x.Name.ToUpper() == name.ToUpper());
+        => _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Name.ToUpper() == name.ToUpper());
 
     public async Task<string?> GetPreferredTtsVoiceAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.PreferredTtsVoice;
     }
 
@@ -101,7 +102,7 @@ public sealed class AuthService
 
     public async Task<string?> GetPreferredTtsLanguageAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.PreferredTtsLanguage;
     }
 
@@ -121,7 +122,7 @@ public sealed class AuthService
 
     public async Task<string?> GetPreferredTtsRegionAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.PreferredTtsRegion;
     }
 
@@ -141,7 +142,7 @@ public sealed class AuthService
 
     public async Task<string?> GetAdminDesktopFallbackTtsVoiceAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.AdminDesktopFallbackTtsVoice;
     }
 
@@ -161,7 +162,7 @@ public sealed class AuthService
 
     public async Task<string?> GetAdminDesktopFallbackTtsLanguageAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.AdminDesktopFallbackTtsLanguage;
     }
 
@@ -181,7 +182,7 @@ public sealed class AuthService
 
     public async Task<string?> GetAdminDesktopFallbackTtsRegionAsync(int userId)
     {
-        var user = await _db.Users.SingleOrDefaultAsync(x => x.Id == userId);
+        var user = await _db.Users.AsNoTracking().SingleOrDefaultAsync(x => x.Id == userId);
         return user?.AdminDesktopFallbackTtsRegion;
     }
 
@@ -205,12 +206,12 @@ public sealed class AuthService
 
     public async Task<List<AppUser>> ListPlayersAsync()
     {
-        var users = await _db.Users.Where(u => !string.IsNullOrWhiteSpace(u.Roles)).ToListAsync();
+        var users = await _db.Users.AsNoTracking().Where(u => !string.IsNullOrWhiteSpace(u.Roles)).ToListAsync();
         return users.Where(u => u.Roles.Contains("Player", StringComparison.OrdinalIgnoreCase) && !u.Roles.Contains("Admin", StringComparison.OrdinalIgnoreCase)).OrderBy(u => u.Name).ToList();
     }
 
     public async Task<List<Group>> GetUserGroupsAsync(int userId)
-        => await _db.Groups.Include(g => g.OwnerUser).Include(g => g.Members).Where(g => g.Members.Any(m => m.UserId == userId)).OrderBy(g => g.Name).ToListAsync();
+        => await _db.Groups.AsNoTracking().Include(g => g.OwnerUser).Include(g => g.Members).Where(g => g.Members.Any(m => m.UserId == userId)).OrderBy(g => g.Name).ToListAsync();
 
     public async Task<List<LoggedInGroupMemberDto>> GetLoggedInUsersInUserGroupsAsync(int userId)
     {
