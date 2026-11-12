@@ -607,6 +607,21 @@
         await SendChatMessage();
     }
 
+    public Task StartTalkFromPhoneAsync()
+    {
+        return OnTalkPointerDown();
+    }
+
+    public Task StopTalkFromPhoneAsync()
+    {
+        return OnTalkPointerUp();
+    }
+
+    public Task ClearMyChatFromPhoneAsync()
+    {
+        return ClearMyChat();
+    }
+
     // ---------------- Walkie-talkie voice (speech-to-text -> chat -> TTS) ----------------
 
     private async Task OnTalkPointerDown()

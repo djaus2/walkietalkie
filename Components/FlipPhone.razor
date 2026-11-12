@@ -1,0 +1,512 @@
+﻿@using WalkieTalkie.Services
+@using System.Linq
+@implements IDisposable
+<div class="flip-phone @(isOpen ? "open" : "closed")">
+
+    <div class="top-half">
+        <div class="outer-screen">
+            <div class="outer-time">@DateTime.Now.ToString("HH:mm")</div>
+        </div>
+    </div>
+
+    <div class="hinge"></div>
+
+    <div class="bottom-half">
+
+        <div class="screen">
+            <div class="status-bar">
+                <span>📶 LTE</span>
+                <span>@(_caps ? "ABC" : "abc")</span>
+                <span>@_talkEventLabel</span>
+                <span>🔋100%</span>
+            </div>
+
+            <div class="display @(_isComposing ? "display-compose" : "display-chat")">
+                @DisplayScreenText
+            </div>
+        </div>
+
+        <div class="action-buttons">
+            <button class="call-btn"
+                    @onpointerdown="OnTalkPointerDown"
+                    @onpointerup="OnTalkPointerUp"
+                    @onpointercancel="OnTalkPointerCancel"
+                    @onpointerleave="OnTalkPointerLeave">📞</button>
+
+            <button class="toggle-btn"
+                    @onclick="TogglePhone">
+                @(isOpen ? "Close" : "Open")
+            </button>
+
+            <button class="end-btn"
+                    @onclick="OnTalkEndClick">📴</button>
+        </div>
+
+        <div class="dpad">
+
+            <button @onclick="NavigateUp">▲</button>
+            <button @onclick="NavigateMenu">☰</button>
+            <button @onclick="NavigateBack">↩</button>
+
+            <button @onclick="NavigateLeft">◄</button>
+            <button class="ok-btn"
+                    @onclick="Select">
+                OK
+            </button>
+            <button @onclick="NavigateRight">►</button>
+
+            <button></button>
+            <button @onclick="NavigateDown">▼</button>
+            <button></button>
+
+        </div>
+
+        <div class="keypad">
+            @foreach (var key in Keys)
+            {
+                <button type="button" @onclick="() => PressKey(key.Digit)">
+                    <div>@key.Digit</div>
+                    <div class="key-letters">@key.Letters</div>
+                </button>
+            }
+        </div>
+
+    </div>
+
+</div>
+
+<style>
+
+    .flip-phone {
+        width: min(360px,95vw);
+        margin: 20px auto;
+        perspective: 1200px;
+        font-family: Segoe UI, Arial, sans-serif;
+    }
+
+    .top-half {
+        height: 140px;
+        background: linear-gradient(180deg,#555,#111);
+        border-radius: 26px 26px 10px 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transform-origin: bottom center;
+        transition: transform 0.7s ease;
+    }
+
+    .flip-phone.closed .top-half {
+        transform: rotateX(-125deg);
+    }
+
+    .outer-screen {
+        width: 150px;
+        height: 60px;
+        border-radius: 12px;
+        background: #132413;
+        border: 2px solid #222;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+    .outer-time {
+        color: #8cff8c;
+        font-weight: bold;
+        font-size: 24px;
+    }
+
+    .hinge {
+        height: 10px;
+        background: silver;
+        border-radius: 6px;
+    }
+
+    .bottom-half {
+        background: linear-gradient(180deg,#2f2f2f,#111);
+        border-radius: 10px 10px 26px 26px;
+        padding: 14px;
+        color: white;
+    }
+
+    .screen {
+        min-height: 150px;
+        background: #b9d59a;
+        border-radius: 18px;
+        color: black;
+        padding: 12px;
+    }
+
+    .status-bar {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+    }
+
+    .display {
+        margin-top: 8px;
+        font-family: Consolas, monospace;
+        white-space: pre-wrap;
+        overflow-y: auto;
+        max-height: 110px;
+        line-height: 1.2;
+    }
+
+    .display-chat {
+        font-size: 11px;
+        text-align: left;
+    }
+
+    .display-compose {
+        font-size: 26px;
+        text-align: center;
+        font-weight: bold;
+    }
+
+    .action-buttons {
+        margin-top: 15px;
+        display: flex;
+        gap: 10px;
+    }
+
+        .action-buttons button {
+            flex: 1;
+        }
+
+    .call-btn {
+        background: #27ae60;
+        color: white;
+    }
+
+    .end-btn {
+        background: #c0392b;
+        color: white;
+    }
+
+    .toggle-btn {
+        background: #2980b9;
+        color: white;
+    }
+
+    .dpad {
+        margin: 15px auto;
+        width: 220px;
+        display: grid;
+        grid-template-columns: repeat(3,1fr);
+        gap: 6px;
+    }
+
+        .dpad button {
+            height: 46px;
+        }
+
+    .ok-btn {
+        background: #888;
+        color: white;
+        border-radius: 50%;
+        font-weight: bold;
+    }
+
+    .keypad {
+        display: grid;
+        grid-template-columns: repeat(3,1fr);
+        gap: 8px;
+    }
+
+        .keypad button {
+            height: 54px;
+            background: #e0e0e0;
+            color: black;
+            font-size: 20px;
+            font-weight: bold;
+            line-height: 1.1;
+        }
+
+        .key-letters {
+            font-size: 20px;
+            font-weight: normal;
+            letter-spacing: 1px;
+        }
+
+    .flip-phone button {
+        border: none;
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+
+        .flip-phone button:hover {
+            filter: brightness(1.1);
+        }
+
+        .flip-phone button:active {
+            transform: scale(.96);
+        }
+
+    @@media (max-width:600px) {
+        .flip-phone {
+            transform: scale(.95);
+        }
+    }
+
+</style>
+
+@code {
+
+    [Inject] private LobbyChatService LobbyChatSvc { get; set; } = default!;
+
+    [Parameter] public int? CurrentUserId { get; set; }
+    [Parameter] public string? CurrentUserName { get; set; }
+    [Parameter] public IEnumerable<int>? UserGroupIds { get; set; }
+    [Parameter] public EventCallback TalkPressed { get; set; }
+    [Parameter] public EventCallback TalkReleased { get; set; }
+    [Parameter] public EventCallback ClearChatRequested { get; set; }
+    [Parameter] public EventCallback CloseRequested { get; set; }
+
+    private bool isOpen = true;
+
+    private bool _isComposing;
+    private string _composeText = "";
+    private string _lobbyChatText = "Lobby Chat";
+    private string DisplayScreenText => _isComposing ? _composeText : _lobbyChatText;
+
+    private sealed record KeyDef(string Digit, string Letters);
+
+    // Classic multi-tap SMS keypad: repeated taps within the timeout cycle the
+    // character in place; a different key or the timeout commits it.
+    private static readonly KeyDef[] Keys =
+    {
+        new("1", ".,?!"), new("2", "ABC"), new("3", "DEF"),
+        new("4", "GHI"), new("5", "JKL"), new("6", "MNO"),
+        new("7", "PQRS"), new("8", "TUV"), new("9", "WXYZ"),
+        new("*", "⌫"), new("0", "␣"), new("#", "Aa")
+    };
+
+    private static readonly Dictionary<string, string> MultiTap = new()
+    {
+        ["1"] = @".,?!'""-()@/:1",
+        ["2"] = "abc2",
+        ["3"] = "def3",
+        ["4"] = "ghi4",
+        ["5"] = "jkl5",
+        ["6"] = "mno6",
+        ["7"] = "pqrs7",
+        ["8"] = "tuv8",
+        ["9"] = "wxyz9",
+        ["0"] = " 0"
+    };
+
+    private const int MultiTapTimeoutMs = 1200;
+
+    private bool _caps;
+    private bool _talkPressed;
+    private string _talkEventLabel = "PTT: up";
+    private string? _pendingKey;
+    private int _pendingIndex;
+    private CancellationTokenSource? _pendingCts;
+
+    protected override void OnInitialized()
+    {
+        LobbyChatSvc.ChatUpdated += OnChatUpdated;
+        RefreshLobbyChatText();
+    }
+
+    protected override void OnParametersSet()
+    {
+        RefreshLobbyChatText();
+    }
+
+    private void OnChatUpdated()
+    {
+        _ = InvokeAsync(() =>
+        {
+            RefreshLobbyChatText();
+            StateHasChanged();
+        });
+    }
+
+    private void RefreshLobbyChatText()
+    {
+        var groupIds = UserGroupIds?.Distinct().ToArray();
+        var messages = LobbyChatSvc.GetMessages(CurrentUserId, groupIds);
+        _lobbyChatText = messages.Any()
+            ? string.Join('\n', messages.Select(m => $"{m.SenderName}: {m.Text}"))
+            : "Lobby Chat";
+    }
+
+    private void PressKey(string key)
+    {
+        if (!_isComposing)
+        {
+            _isComposing = true;
+            _composeText = "";
+            CancelPending();
+        }
+
+        if (key == "*")
+        {
+            // Backspace
+            if (_composeText.Length > 0)
+                _composeText = _composeText.Substring(0, _composeText.Length - 1);
+            CancelPending();
+            return;
+        }
+
+        if (key == "#")
+        {
+            // Caps/shift toggle, like classic # key; applies to the char being cycled
+            _caps = !_caps;
+            if (_pendingKey is not null && _composeText.Length > 0 && MultiTap.TryGetValue(_pendingKey, out var cs))
+                _composeText = _composeText.Substring(0, _composeText.Length - 1) + ApplyCase(cs[_pendingIndex]);
+            return;
+        }
+
+        if (!MultiTap.TryGetValue(key, out var chars)) return;
+
+        if (_pendingKey == key && _composeText.Length > 0)
+        {
+            _pendingIndex = (_pendingIndex + 1) % chars.Length;
+            _composeText = _composeText.Substring(0, _composeText.Length - 1) + ApplyCase(chars[_pendingIndex]);
+        }
+        else
+        {
+            _pendingKey = key;
+            _pendingIndex = 0;
+            _composeText += ApplyCase(chars[0]);
+        }
+
+        RestartPendingTimer();
+    }
+
+    private char ApplyCase(char c) => _caps ? char.ToUpperInvariant(c) : c;
+
+    private void CancelPending()
+    {
+        _pendingKey = null;
+        _pendingIndex = 0;
+        _pendingCts?.Cancel();
+    }
+
+    private void RestartPendingTimer()
+    {
+        var cts = new CancellationTokenSource();
+        _pendingCts?.Cancel();
+        _pendingCts = cts;
+        _ = PendingTimeoutAsync(cts);
+    }
+
+    private async Task PendingTimeoutAsync(CancellationTokenSource cts)
+    {
+        try
+        {
+            await Task.Delay(MultiTapTimeoutMs, cts.Token);
+            if (ReferenceEquals(_pendingCts, cts))
+            {
+                _pendingKey = null;
+                _pendingIndex = 0;
+            }
+        }
+        catch (TaskCanceledException)
+        {
+        }
+    }
+
+    private void Navigate(string direction)
+    {
+        _ = direction;
+    }
+
+    private async Task OnTalkPointerDown()
+    {
+        if (_talkPressed) return;
+        _talkPressed = true;
+        _talkEventLabel = "PTT: down";
+        await TalkPressed.InvokeAsync();
+    }
+
+    private async Task OnTalkPointerUp()
+    {
+        if (!_talkPressed) return;
+        _talkPressed = false;
+        _talkEventLabel = "PTT: up";
+        await TalkReleased.InvokeAsync();
+    }
+
+    private async Task OnTalkPointerCancel()
+    {
+        _talkPressed = false;
+        _talkEventLabel = "PTT: cancel";
+        await TalkReleased.InvokeAsync();
+    }
+
+    private async Task OnTalkPointerLeave()
+    {
+        if (!_talkPressed) return;
+        _talkPressed = false;
+        _talkEventLabel = "PTT: leave";
+        await TalkReleased.InvokeAsync();
+    }
+
+    private async Task OnTalkEndClick()
+    {
+        _talkPressed = false;
+        _talkEventLabel = "PTT: up";
+        await TalkReleased.InvokeAsync();
+        await ClearChatRequested.InvokeAsync();
+    }
+
+    private void NavigateUp() => Navigate("Up");
+    private void NavigateMenu() => Navigate("Menu");
+    private void NavigateBack() => Navigate("Back");
+    private void NavigateLeft() => Navigate("Left");
+    private void NavigateRight() => Navigate("Right");
+    private void NavigateDown() => Navigate("Down");
+
+    private Task Select()
+    {
+        if (!_isComposing) return Task.CompletedTask;
+
+        var text = _composeText.Trim();
+        if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
+        if (!CurrentUserId.HasValue || CurrentUserId.Value <= 0) return Task.CompletedTask;
+
+        var senderId = CurrentUserId.Value;
+        var senderName = string.IsNullOrWhiteSpace(CurrentUserName) ? $"User{senderId}" : CurrentUserName!;
+        var userGroupIds = UserGroupIds?.Distinct().ToArray() ?? Array.Empty<int>();
+
+        var messageSent = false;
+        foreach (var groupId in userGroupIds)
+        {
+            var success = LobbyChatSvc.AddMessageWithGroupCheck(senderId, senderName, text, userGroupIds, groupId);
+            if (success) messageSent = true;
+        }
+
+        if (messageSent)
+        {
+            _composeText = "";
+            _isComposing = false;
+            CancelPending();
+            RefreshLobbyChatText();
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        LobbyChatSvc.ChatUpdated -= OnChatUpdated;
+        _pendingCts?.Cancel();
+        _pendingCts?.Dispose();
+    }
+
+    private async Task TogglePhone()
+    {
+        if (CloseRequested.HasDelegate)
+        {
+            await CloseRequested.InvokeAsync();
+            return;
+        }
+
+        isOpen = !isOpen;
+    }
+}

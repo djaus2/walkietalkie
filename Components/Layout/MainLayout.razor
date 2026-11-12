@@ -7,7 +7,7 @@
 @implements IAsyncDisposable
 
 <CascadingAuthenticationState>
-    <div style="padding:12px 0;">
+    <div class="wt-layout-header" style="padding:12px 0;">
         <div style="width:420px;max-width:calc(100vw - 24px);margin:0;display:flex;align-items:center;justify-content:space-between;gap:12px;">
             <h1 style="margin:0;font-weight:800;letter-spacing:0.5px;color:#6a1b9a;text-shadow:0 1px 0 rgba(0,0,0,0.15);">WalkieTalkie</h1>
             @if (_isActuallyAuthenticated && !IsHomePage() && !IsLoginPage())
@@ -25,6 +25,12 @@
         @Body
     </div>
 </CascadingAuthenticationState>
+
+<style>
+    .wt-phone-modal-visible .wt-layout-header {
+        display: none;
+    }
+</style>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.

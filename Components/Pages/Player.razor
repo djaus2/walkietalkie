@@ -11,27 +11,38 @@
 @inject SettingsService Settings
 @inject UsableMsVoiceService UsableMsVoices
 
-<PageTitleHeading Title="Player" HeadingLevel="2" />
-
-<p>You are logged in as <b>@_currentUserName</b>.</p>
-
-@if (_sessionExpiresAt.HasValue)
+@if (!_showPhoneModal)
 {
-    <div style="margin-top:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;max-width:360px;">
-        <div style="font-size:13px;font-weight:bold;margin-bottom:4px;">Session Timeout</div>
-        <div style="font-size:14px;">
-            @if (_sessionTimeRemaining.TotalSeconds > 0)
-            {
-                <span>Time remaining: <b>@FormatTimeRemaining(_sessionTimeRemaining)</b></span>
-            }
-            else
-            {
-                <span style="color:#d32f2f;font-weight:bold;">Session expired - logging out...</span>
-            }
+    <PageTitleHeading Title="Player" HeadingLevel="2" />
+
+    <p>You are logged in as <b>@_currentUserName</b>.</p>
+
+    @if (_sessionExpiresAt.HasValue)
+    {
+        <div style="margin-top:8px;padding:8px 12px;background:#fff3cd;border:1px solid #ffc107;border-radius:4px;max-width:360px;">
+            <div style="font-size:13px;font-weight:bold;margin-bottom:4px;">Session Timeout</div>
+            <div style="font-size:14px;">
+                @if (_sessionTimeRemaining.TotalSeconds > 0)
+                {
+                    <span>Time remaining: <b>@FormatTimeRemaining(_sessionTimeRemaining)</b></span>
+                }
+                else
+                {
+                    <span style="color:#d32f2f;font-weight:bold;">Session expired - logging out...</span>
+                }
+            </div>
         </div>
-    </div>
+    }
 }
 
+<div class="wt-tab-bar" style="@(_showPhoneModal ? "display:none" : null)">
+    <button type="button" class="@TabClass("chat")" @onclick='() => SetTab("chat")'>Chat</button>
+    <button type="button" class="@TabClass("settings")" @onclick='() => SetTab("settings")'>Settings</button>
+    <span style="flex:1"></span>
+    <button type="button" class="wt-tab" @onclick="ShowPhoneModal">📱 Phone</button>
+</div>
+
+<div style='@TabPanelStyleWithPhone("chat")'>
 <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Member of Groups:</h4>
 
 @if (_userGroups?.Any() == true)
@@ -74,6 +85,12 @@ else if (_userGroups?.Any() == true)
     </div>
 }
 
+<LobbyChat @ref="_lobbyChatRef"
+           CurrentUserId="@_cachedUserId"
+           OtherUserOnline="@(_loggedInGroupMembers.Any())" />
+</div>
+
+<div style='@TabPanelStyleWithPhone("settings")'>
 <h4 class="rainbow-heading rainbow-heading--sm" style="margin-top:18px;">Voice</h4>
 
 @if (_isPhoneClient)
@@ -165,11 +182,76 @@ else
         PIN change is currently disabled. Please contact an administrator if you need to change your PIN.
     </div>
 }
+</div>
 
-<LobbyChat CurrentUserId="@_cachedUserId" OtherUserOnline="@(_loggedInGroupMembers.Any())" />
+@if (_showPhoneModal)
+{
+    <div class="wt-modal-backdrop" @onclick="ClosePhoneModal">
+        <div class="wt-modal" @onclick:stopPropagation="true">
+            <button type="button" class="wt-modal-close" @onclick="ClosePhoneModal">✕</button>
+            <FlipPhone CurrentUserId="@_cachedUserId"
+                       CurrentUserName="@_currentUserName"
+                       UserGroupIds="@(_userGroups?.Select(g => g.Id))"
+                       TalkPressed="OnFlipPhoneTalkPressed"
+                       TalkReleased="OnFlipPhoneTalkReleased"
+                       ClearChatRequested="OnFlipPhoneClearChatRequested"
+                       CloseRequested="ClosePhoneModal" />
+        </div>
+    </div>
+}
 
 <script>
   window.WalkieTalkieVoice = window.WalkieTalkieVoice || {};
+  window.walkieTalkiePlayer = window.walkieTalkiePlayer || {};
+  window.walkieTalkiePlayer.setPhoneModalVisible = function (isVisible) {
+    try {
+      if (!document || !document.body) return;
+      document.body.classList.toggle('wt-phone-modal-visible', !!isVisible);
+    } catch (e) {
+    }
+  };
+  window.walkieTalkiePlayer.fitWindowToPhone = function (preferredWidth, preferredHeight) {
+    try {
+      if (!window || !document) return false;
+
+      var isMaxed = (window.outerWidth >= (screen.availWidth - 8)) && (window.outerHeight >= (screen.availHeight - 8));
+      if (isMaxed) return false;
+
+      var padW = 40;
+      var padH = 80;
+      var desiredInnerWidth = 0;
+      var desiredInnerHeight = 0;
+
+      if (preferredWidth && preferredHeight) {
+        desiredInnerWidth = Math.ceil(preferredWidth + padW);
+        desiredInnerHeight = Math.ceil(preferredHeight + padH);
+      } else {
+        var modal = document.querySelector('.wt-modal');
+        var phone = document.querySelector('.flip-phone');
+        var target = phone || modal;
+        if (!target) return false;
+
+        var rect = target.getBoundingClientRect();
+        desiredInnerWidth = Math.ceil(rect.width + padW);
+        desiredInnerHeight = Math.ceil(rect.height + padH);
+      }
+
+      var chromeW = window.outerWidth - window.innerWidth;
+      var chromeH = window.outerHeight - window.innerHeight;
+
+      var newOuterWidth = Math.min(screen.availWidth, desiredInnerWidth + chromeW);
+      var newOuterHeight = Math.min(screen.availHeight, desiredInnerHeight + chromeH);
+
+      if (window.resizeTo) {
+        window.resizeTo(newOuterWidth, newOuterHeight);
+        return true;
+      }
+
+      return false;
+    } catch (e) {
+      return false;
+    }
+  };
   window.WalkieTalkieVoice.version = 'player-voices-2026-03-09a';
   window.WalkieTalkieVoice.ping = function () {
     try {
@@ -209,6 +291,15 @@ else
     private string _currentUserName = "";
     private bool _allowPlayerPinChange = true;
     private bool _isAdminUser = false;
+
+    private string _activeTab = "chat";
+    private bool _showPhoneModal = true;
+    private bool _phoneWindowFitAttempted;
+    private LobbyChat? _lobbyChatRef;
+    private void SetTab(string tab) => _activeTab = tab;
+    private string TabClass(string tab) => _activeTab == tab ? "wt-tab wt-tab-active" : "wt-tab";
+    private string TabPanelStyle(string tab) => _activeTab == tab ? "" : "display:none";
+    private string TabPanelStyleWithPhone(string tab) => _showPhoneModal ? "display:none" : TabPanelStyle(tab);
 
     // Session timeout tracking
     private DateTimeOffset? _sessionExpiresAt = null;
@@ -260,9 +351,61 @@ else
 
     private System.Threading.Timer? _membersRefreshTimer;
 
+    private async Task OnFlipPhoneTalkPressed()
+    {
+        if (_lobbyChatRef is null) return;
+        await _lobbyChatRef.StartTalkFromPhoneAsync();
+    }
+
+    private async Task OnFlipPhoneTalkReleased()
+    {
+        if (_lobbyChatRef is null) return;
+        await _lobbyChatRef.StopTalkFromPhoneAsync();
+    }
+
+    private async Task OnFlipPhoneClearChatRequested()
+    {
+        if (_lobbyChatRef is null) return;
+        await _lobbyChatRef.ClearMyChatFromPhoneAsync();
+    }
+
+    private async Task ShowPhoneModal()
+    {
+        _showPhoneModal = true;
+        _phoneWindowFitAttempted = false;
+
+        try
+        {
+            await JS.InvokeAsync<bool>("walkieTalkiePlayer.fitWindowToPhone", 420, 760);
+        }
+        catch
+        {
+        }
+    }
+
+    private void ClosePhoneModal()
+    {
+        _showPhoneModal = false;
+        _phoneWindowFitAttempted = false;
+    }
+
     // Initialize group selection
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        try
+        {
+            await JS.InvokeVoidAsync("walkieTalkiePlayer.setPhoneModalVisible", _showPhoneModal);
+
+            if (_showPhoneModal && !_phoneWindowFitAttempted)
+            {
+                _phoneWindowFitAttempted = true;
+                await JS.InvokeAsync<bool>("walkieTalkiePlayer.fitWindowToPhone");
+            }
+        }
+        catch
+        {
+        }
+
         if (!firstRender) return;
 
         // Handle voice initialization (from second method)
@@ -1046,6 +1189,14 @@ else
 
     public void Dispose()
     {
+        try
+        {
+            _ = JS.InvokeVoidAsync("walkieTalkiePlayer.setPhoneModalVisible", false);
+        }
+        catch
+        {
+        }
+
         try
         {
             _membersRefreshTimer?.Dispose();
