@@ -48,7 +48,7 @@ activity logs.
 [https://walkietalkie.sportronics.com.au](https://walkietalkie.sportronics.com.au/)  
 *To Do: Add Ring*
 
-![Flip Phone UI](https://github.com/djaus2/walkietalkie/blob/main/flipphone.pngg)
+![Flip Phone UI](https://github.com/djaus2/walkietalkie/blob/main/flipphone.png)
 
 ## Flip Phone Keyboard Usage Guide
 
