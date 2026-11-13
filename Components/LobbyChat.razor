@@ -84,9 +84,9 @@
                 }
             </button>
         </div>
-        @if (IsVoiceMuted && !string.IsNullOrWhiteSpace(VoiceLobby.VoiceMutedByUserName))
+        @if (IsVoiceMuted && !string.IsNullOrWhiteSpace(MutedByName))
         {
-            <span style="font-size:14px;color:red">Muted by @VoiceLobby.VoiceMutedByUserName</span>
+            <span style="font-size:14px;color:red">Muted by @MutedByName</span>
         }
         <p style="margin-top:8px;font-size:13px;color:#555;">@_voiceStatus@(!string.IsNullOrWhiteSpace(_ttsStatus) ? (" " + _ttsStatus) : "")</p>
     }
@@ -170,20 +170,31 @@
     [Parameter]
     public bool OtherUserOnline { get; set; }
 
+    private int[] MyGroupIds => _userGroups?.Select(g => g.Id).ToArray() ?? Array.Empty<int>();
+
     private bool IsVoiceFloorHeldByOther
     {
         get
         {
-            if (!VoiceLobby.VoiceFloorUserId.HasValue) return false;
-            if (VoiceLobby.VoiceFloorUserId.Value == _currentUserId) return false;
-            if (!VoiceLobby.VoiceFloorUntilUtc.HasValue) return false;
-            return VoiceLobby.VoiceFloorUntilUtc.Value > DateTime.UtcNow;
+            if (!_currentUserId.HasValue) return false;
+            return VoiceLobby.IsFloorHeldByOther(MyGroupIds, _currentUserId.Value);
         }
     }
 
-    private bool IsVoiceMuted => VoiceLobby.VoiceMuted;
+    private bool IsVoiceMuted => VoiceLobby.IsMuted(MyGroupIds);
 
-    private bool CanUnmute => VoiceLobby.VoiceMutedByUserId == _currentUserId;
+    private bool CanUnmute => VoiceLobby.GetMuteInfo(MyGroupIds)?.ByUserId == _currentUserId;
+
+    private string? MutedByName => VoiceLobby.GetMuteInfo(MyGroupIds)?.ByUserName;
+
+    private string? FloorHolderName
+    {
+        get
+        {
+            if (!_currentUserId.HasValue) return null;
+            return VoiceLobby.GetFloorHolder(MyGroupIds, _currentUserId.Value)?.UserName;
+        }
+    }
 
     private bool CanPressToTalk => _voiceSupported && _talkEnabled && OtherUserOnline && !_pttHeld && !IsVoiceFloorHeldByOther && !IsVoiceMuted;
 
@@ -208,7 +219,7 @@
         {
             if (!IsVoiceMuted) return "Mute voice for everyone";
             if (CanUnmute) return "Unmute voice";
-            return $"Muted by {VoiceLobby.VoiceMutedByUserName ?? "other user"} - only they can unmute";
+            return $"Muted by {MutedByName ?? "other user"} - only they can unmute";
         }
     }
 
@@ -268,7 +279,7 @@
         {
             if (_pttHeld && _currentUserId.HasValue && _currentUserId.Value > 0)
             {
-                VoiceLobby.ReleaseVoiceFloor(_currentUserId.Value);
+                VoiceLobby.ReleaseAllVoiceFloors(_currentUserId.Value);
             }
         }
         catch
@@ -461,7 +472,7 @@
 
         if (IsVoiceFloorHeldByOther)
         {
-            var name = VoiceLobby.VoiceFloorUserName;
+            var name = FloorHolderName;
             _voiceStatus = string.IsNullOrWhiteSpace(name) ? "Other talking…" : $"{name} talking…";
             return;
         }
@@ -486,7 +497,7 @@
     private void ToggleMute()
     {
         if (!_currentUserId.HasValue) return;
-        var (ok, msg) = VoiceLobby.ToggleVoiceMute(_currentUserId.Value, _currentUserName);
+        var (ok, msg) = VoiceLobby.ToggleVoiceMute(_currentUserId.Value, _currentUserName, MyGroupIds);
         if (!ok && !string.IsNullOrWhiteSpace(msg))
         {
             _voiceStatus = msg;
@@ -631,13 +642,14 @@
         if (!OtherUserOnline) return;
         if (_pttHeld) return;
         if (IsVoiceFloorHeldByOther) return;
+        if (IsVoiceMuted) return;
 
         _pttHeld = true;
         _voiceStatus = "Talking…";
 
         if (_currentUserId.HasValue && _currentUserId.Value > 0)
         {
-            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName);
+            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
         }
 
         _voiceDotNetRef ??= DotNetObjectReference.Create(this);
@@ -655,7 +667,7 @@
         {
             if (!_pttHeld) return;
             if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return;
-            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName);
+            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
         }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
 
         await InvokeAsync(StateHasChanged);
@@ -671,7 +683,7 @@
 
         if (_currentUserId.HasValue && _currentUserId.Value > 0)
         {
-            VoiceLobby.ReleaseVoiceFloor(_currentUserId.Value);
+            VoiceLobby.ReleaseAllVoiceFloors(_currentUserId.Value);
         }
 
         try
@@ -702,7 +714,7 @@
         // Note: _pttHeld may already be false since JS flush is delayed after button release
         if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return Task.CompletedTask;
         if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
-        if (VoiceLobby.VoiceMuted) return Task.CompletedTask;
+        if (IsVoiceMuted) return Task.CompletedTask;
 
         var clean = text.Trim();
         var userGroupIds = _userGroups?.Select(g => g.Id) ?? Enumerable.Empty<int>();
@@ -739,7 +751,6 @@
     {
         if (!_talkEnabled) return;
         if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return;
-        if (VoiceLobby.VoiceMuted) return;
 
         if (fromIndex < 0) fromIndex = 0;
 
@@ -767,6 +778,7 @@
 
                 var t = m.Text ?? string.Empty;
                 if (!t.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase)) continue;
+                if (VoiceLobby.IsGroupMuted(m.GroupId)) continue; // per-group mute
 
                 var payload = t.Substring(VoicePrefix.Length).Trim();
                 if (string.IsNullOrWhiteSpace(payload)) continue;
@@ -799,7 +811,6 @@
                 }
 
                 if (!_talkEnabled) break;
-                if (VoiceLobby.VoiceMuted) break;
 
                 try
                 {

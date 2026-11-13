@@ -118,3 +118,12 @@ Digit keys insert literal digits directly (no letter cycling).
 - `▲`, `▼`, `◄`, `►`, `☰`, `↩` are currently wired as navigation placeholders.
 - `OK` sends composed text to chat (when composing).
 
+### Group Mechanics
+
+> Note: Every user is in exactly one group, it's simpler :
+
+- Each group is its own walkie-talkie channel.
+- Holding Talk takes the floor on your group only; people in other groups are never blocked by it.
+- Mute is per group. Someone mutes → only that group's voice is silenced (until they unmute); other groups talk and hear normally.
+- The "Muted"/"Other talking…" indicators now reflect your group's state only.
+- The multi-group mechanics still exist under the hood (floor acquired across all of a user's groups, mute applied to all their groups) — with one group each it's exactly equivalent to per-user.

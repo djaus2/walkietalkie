@@ -487,6 +487,9 @@
         catch (TaskCanceledException)
         {
         }
+        catch (ObjectDisposedException)
+        {
+        }
     }
 
     private void Navigate(string direction)
