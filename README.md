@@ -13,6 +13,8 @@ Derived from the [Draughts/Checkers game app](https://github.com/djaus2/Drafts)
 with the game-play removed — only the lobby chat and walkie-talkie voice
 functionality remains.
 
+> Latest: Added FlipPhone UI.
+
 ## How it works
 
 - **Text chat**: type a message in Lobby Chat and press Enter. Messages go to
