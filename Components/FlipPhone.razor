@@ -16,7 +16,7 @@
         <div class="screen">
             <div class="status-bar">
                 <span>📶 LTE</span>
-                <span>@(_caps ? "ABC" : "abc")</span>
+                <span>@ModeLabel</span>
                 <span>@_talkEventLabel</span>
                 <span>🔋100%</span>
             </div>
@@ -298,7 +298,19 @@
 
     private const int MultiTapTimeoutMs = 1200;
 
-    private bool _caps;
+    private enum InputMode { Lower, Sentence, Upper, Digits }
+
+    private InputMode _inputMode = InputMode.Lower;
+
+    private string ModeLabel => _inputMode switch
+    {
+        InputMode.Lower => "abc",
+        InputMode.Sentence => "Abc",
+        InputMode.Upper => "ABC",
+        InputMode.Digits => "123",
+        _ => "abc"
+    };
+
     private bool _talkPressed;
     private string _talkEventLabel = "PTT: up";
     private string? _pendingKey;
@@ -336,10 +348,12 @@
 
     private void PressKey(string key)
     {
+        var wasComposing = _isComposing;
         if (!_isComposing)
         {
             _isComposing = true;
             _composeText = "";
+            SetInputMode(InputMode.Sentence); // new chat starts in "Abc"
             CancelPending();
         }
 
@@ -348,16 +362,24 @@
             // Backspace
             if (_composeText.Length > 0)
                 _composeText = _composeText.Substring(0, _composeText.Length - 1);
+            if (_composeText.Length == 0)
+                SetInputMode(InputMode.Sentence); // emptied line counts as a new chat
             CancelPending();
             return;
         }
 
         if (key == "#")
         {
-            // Caps/shift toggle, like classic # key; applies to the char being cycled
-            _caps = !_caps;
-            if (_pendingKey is not null && _composeText.Length > 0 && MultiTap.TryGetValue(_pendingKey, out var cs))
-                _composeText = _composeText.Substring(0, _composeText.Length - 1) + ApplyCase(cs[_pendingIndex]);
+            // Classic # key: cycle input mode abc -> Abc -> ABC -> 123 -> abc.
+            // A # press that opened compose just enters in Abc — don't double-advance.
+            if (wasComposing) CycleInputMode();
+            return;
+        }
+
+        if (_inputMode == InputMode.Digits)
+        {
+            // Digits mode: keys insert their literal digit, no multi-tap
+            _composeText += key;
             return;
         }
 
@@ -366,19 +388,75 @@
         if (_pendingKey == key && _composeText.Length > 0)
         {
             _pendingIndex = (_pendingIndex + 1) % chars.Length;
-            _composeText = _composeText.Substring(0, _composeText.Length - 1) + ApplyCase(chars[_pendingIndex]);
+            var before = _composeText.Substring(0, _composeText.Length - 1);
+            _composeText = before + ApplyCase(chars[_pendingIndex], ShouldCapitalizeNext(before));
         }
         else
         {
             _pendingKey = key;
             _pendingIndex = 0;
-            _composeText += ApplyCase(chars[0]);
+            _composeText += ApplyCase(chars[0], ShouldCapitalizeNext(_composeText));
         }
 
         RestartPendingTimer();
     }
 
-    private char ApplyCase(char c) => _caps ? char.ToUpperInvariant(c) : c;
+    private void SetInputMode(InputMode mode)
+    {
+        if (_inputMode == mode) return;
+        _inputMode = mode;
+        System.Diagnostics.Debug.WriteLine($"[FlipPhone] Input mode -> {mode}");
+    }
+
+    private void CycleInputMode()
+    {
+        SetInputMode(_inputMode switch
+        {
+            InputMode.Lower => InputMode.Sentence,
+            InputMode.Sentence => InputMode.Upper,
+            InputMode.Upper => InputMode.Digits,
+            _ => InputMode.Lower
+        });
+
+        if (_inputMode == InputMode.Sentence && _composeText.Length > 0)
+        {
+            // "Abc" = first letter of the message is capital, rest lower —
+            // fix up the first char even if it was typed before entering this mode
+            _composeText = char.ToUpperInvariant(_composeText[0]) + _composeText.Substring(1);
+        }
+
+        if (_pendingKey is null || _composeText.Length == 0 || !MultiTap.TryGetValue(_pendingKey, out var cs)) return;
+
+        if (_inputMode == InputMode.Digits)
+        {
+            // Commit the letter being cycled; digit keys now insert literally
+            CancelPending();
+            return;
+        }
+
+        var before = _composeText.Substring(0, _composeText.Length - 1);
+        _composeText = before + ApplyCase(cs[_pendingIndex], ShouldCapitalizeNext(before));
+        RestartPendingTimer();
+    }
+
+    private char ApplyCase(char c, bool capitalize) => _inputMode switch
+    {
+        InputMode.Upper => char.ToUpperInvariant(c),
+        InputMode.Sentence => capitalize ? char.ToUpperInvariant(c) : char.ToLowerInvariant(c),
+        _ => char.ToLowerInvariant(c)
+    };
+
+    // Sentence mode (Abc): capitalize the first char, any char after whitespace,
+    // and any char following ., ! or ?.
+    private static bool ShouldCapitalizeNext(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return true;
+        if (char.IsWhiteSpace(text[text.Length - 1])) return true;
+        var trimmed = text.TrimEnd();
+        if (trimmed.Length == 0) return true;
+        var last = trimmed[trimmed.Length - 1];
+        return last is '.' or '!' or '?';
+    }
 
     private void CancelPending()
     {

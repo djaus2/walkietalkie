@@ -37,3 +37,80 @@ activity logs.
 - In-memory lobby chat + voice floor services
 - Web Speech API (`SpeechRecognition` + `speechSynthesis`) in
   `wwwroot/js/walkieTalkie.js`
+
+---
+
+# The FlipPhone
+
+> Now Custom Domain users can use a flip phone keypad to send chat messages and talk.  
+[https://walkietalkie.sportronics.com.au](https://walkietalkie.sportronics.com.au/)  
+*To Do: Add Ring*
+
+## Flip Phone Keyboard Usage Guide
+
+### Overview
+
+The flip phone keypad supports classic multi-tap SMS input and chat send behavior.
+
+- Idle screen: shows Lobby Chat
+- Start typing: switches to compose mode and clears the compose line
+- Press OK: sends typed message to chat, then returns to Lobby Chat view
+
+### Keypad Layout and Functions
+
+| Key | Function |
+| --- | --- |
+| `1` | `.,?!'"-()@/:1` (multi-tap cycle) |
+| `2` | `abc2` |
+| `3` | `def3` |
+| `4` | `ghi4` |
+| `5` | `jkl5` |
+| `6` | `mno6` |
+| `7` | `pqrs7` |
+| `8` | `tuv8` |
+| `9` | `wxyz9` |
+| `0` | space + `0` (multi-tap cycle) |
+| `*` | Backspace |
+| `#` | Cycle input mode (`abc` → `Abc` → `ABC` → `123` → `abc`) |
+
+### Input Modes
+
+#### `abc` (Lowercase)
+
+All letters are lowercase.
+
+#### `Abc` (Sentence mode)
+
+Auto-capitalizes:
+
+- start of message
+- after whitespace (for example, after space)
+- after `.`, `!`, `?`
+
+#### `ABC` (Uppercase)
+
+All letters are uppercase.
+
+#### `123` (Digits mode)
+
+Digit keys insert literal digits directly (no letter cycling).
+
+### Multi-Tap Behavior
+
+- Repeated presses of the same number key within timeout cycle characters in place.
+- Pressing a different key commits the previous character and starts a new one.
+- Timeout (~1200ms) commits the current character automatically.
+
+### Action Buttons
+
+| Button | Behavior |
+| --- | --- |
+| Green (📞) | Push-to-talk press/release events |
+| Blue (Open/Close) | Closes phone modal when hosted in Player |
+| Red (📴) | Releases talk + triggers Clear My Chat flow |
+
+### D-Pad
+
+- `▲`, `▼`, `◄`, `►`, `☰`, `↩` are currently wired as navigation placeholders.
+- `OK` sends composed text to chat (when composing).
+
