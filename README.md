@@ -111,12 +111,21 @@ Digit keys insert literal digits directly (no letter cycling).
 | --- | --- |
 | Green (📞) | Push-to-talk press/release events |
 | Blue (Open/Close) | Closes phone modal when hosted in Player |
-| Red (📴) | Releases talk + triggers Clear My Chat flow |
+| Red (📴) | Releases talk and clears the current unsent compose text |
 
 ### D-Pad
 
 - `▲`, `▼`, `◄`, `►`, `☰`, `↩` are currently wired as navigation placeholders.
 - `OK` sends composed text to chat (when composing).
+
+### Laptop Keyboard Support
+
+When the FlipPhone is focused, laptop keyboard input is supported:
+
+- `A-Z`, `a-z`, `0-9`: appends directly to the compose text
+- `Space`: appends a space
+- `Backspace`: deletes the last compose character
+- `Enter`: sends chat (same behavior as `OK`)
 
 ### Group Mechanics
 

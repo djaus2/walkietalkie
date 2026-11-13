@@ -1,7 +1,10 @@
 ﻿@using WalkieTalkie.Services
 @using System.Linq
 @implements IDisposable
-<div class="flip-phone @(isOpen ? "open" : "closed")">
+<div class="flip-phone @(isOpen ? "open" : "closed")"
+     tabindex="0"
+     @onkeydown="OnLaptopKeyDown"
+     @onkeydown:preventDefault="true">
 
     <div class="top-half">
         <div class="outer-screen">
@@ -31,7 +34,7 @@
                     @onpointerdown="OnTalkPointerDown"
                     @onpointerup="OnTalkPointerUp"
                     @onpointercancel="OnTalkPointerCancel"
-                    @onpointerleave="OnTalkPointerLeave">📞</button>
+                    @onpointerleave="OnTalkPointerLeave">📞Talk</button>
 
             <button class="toggle-btn"
                     @onclick="TogglePhone">
@@ -39,7 +42,7 @@
             </button>
 
             <button class="end-btn"
-                    @onclick="OnTalkEndClick">📴</button>
+                    @onclick="OnTalkEndClick">📴Clr</button>
         </div>
 
         <div class="dpad">
@@ -51,7 +54,7 @@
             <button @onclick="NavigateLeft">◄</button>
             <button class="ok-btn"
                     @onclick="Select">
-                OK
+                Send
             </button>
             <button @onclick="NavigateRight">►</button>
 
@@ -349,13 +352,7 @@
     private void PressKey(string key)
     {
         var wasComposing = _isComposing;
-        if (!_isComposing)
-        {
-            _isComposing = true;
-            _composeText = "";
-            SetInputMode(InputMode.Sentence); // new chat starts in "Abc"
-            CancelPending();
-        }
+        BeginComposeIfNeeded();
 
         if (key == "*")
         {
@@ -399,6 +396,55 @@
         }
 
         RestartPendingTimer();
+    }
+
+    private void BeginComposeIfNeeded()
+    {
+        if (_isComposing) return;
+        _isComposing = true;
+        _composeText = "";
+        SetInputMode(InputMode.Sentence); // new chat starts in "Abc"
+        CancelPending();
+    }
+
+    private async Task OnLaptopKeyDown(KeyboardEventArgs e)
+    {
+        var key = e.Key ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(key)) return;
+
+        if (string.Equals(key, "Enter", StringComparison.OrdinalIgnoreCase))
+        {
+            await Select();
+            return;
+        }
+
+        if (string.Equals(key, "Backspace", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_isComposing && _composeText.Length > 0)
+            {
+                _composeText = _composeText.Substring(0, _composeText.Length - 1);
+                if (_composeText.Length == 0)
+                    SetInputMode(InputMode.Sentence);
+            }
+
+            CancelPending();
+            return;
+        }
+
+        if (string.Equals(key, " ", StringComparison.Ordinal) || string.Equals(key, "Spacebar", StringComparison.OrdinalIgnoreCase))
+        {
+            BeginComposeIfNeeded();
+            _composeText += " ";
+            CancelPending();
+            return;
+        }
+
+        if (key.Length == 1 && char.IsLetterOrDigit(key[0]))
+        {
+            BeginComposeIfNeeded();
+            _composeText += key;
+            CancelPending();
+        }
     }
 
     private void SetInputMode(InputMode mode)
@@ -533,7 +579,11 @@
         _talkPressed = false;
         _talkEventLabel = "PTT: up";
         await TalkReleased.InvokeAsync();
-        await ClearChatRequested.InvokeAsync();
+
+        // Red key clears only the current draft being entered.
+        _composeText = "";
+        _isComposing = false;
+        CancelPending();
     }
 
     private void NavigateUp() => Navigate("Up");
