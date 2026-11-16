@@ -1,8 +1,8 @@
-# Blazor Online WalkieTalkie — 2-person text and TTS voice chat
+# Blazor Online WalkieTalkie — Multi-person text and TTS voice chat
 
-> Walkie-talkie style chat between 2 logged-in users over the internet.
+> Walkie-talkie style chat between logged-in users in the same group over the internet.
 > Lobby text chat plus hold-to-talk voice: your speech is transcribed in the
-> browser, sent as a voice message, and spoken aloud on the other person's
+> browser, sent as a voice message, and spoken aloud on the other persons'
 > device using your chosen TTS voice.
 >
 > Users must be in the same group/s to be able to chat with each other. See the
@@ -110,9 +110,9 @@ Digit keys insert literal digits directly (no letter cycling).
 
 | Button | Behavior |
 | --- | --- |
-| Green (📞) | Push-to-talk press/release events |
-| Blue (Open/Close) | Closes phone modal when hosted in Player |
-| Red (📴) | Releases talk and clears the current unsent compose text |
+| Green (📞) | Push-and-hold-to-talk press/release events |
+| Blue (Open/Close) | Closes phone modal when hosted in Player. Return to setup. |
+| Red (📴) | Clears the current unsent compose text |
 
 ### D-Pad
 
@@ -126,7 +126,7 @@ When the FlipPhone is focused, laptop keyboard input is supported:
 - `A-Z`, `a-z`, `0-9`: appends directly to the compose text
 - `Space`: appends a space
 - `Backspace`: deletes the last compose character
-- `Enter`: sends chat (same behavior as `OK`)
+- `Send`: sends chat (same behavior as `OK`)
 
 ### Group Mechanics
 
