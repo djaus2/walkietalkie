@@ -24,7 +24,7 @@
                 <span>🔋100%</span>
             </div>
 
-            <div class="display @(_isComposing ? "display-compose" : "display-chat")">
+            <div class="display @(_isComposing ? "display-compose" : "display-chat")" @ref="_displayRef">
                 @DisplayScreenText
             </div>
         </div>
@@ -32,9 +32,13 @@
         <div class="action-buttons">
             <button class="call-btn"
                     @onpointerdown="OnTalkPointerDown"
+                    @onpointerdown:preventDefault="true"
+                    @onpointerdown:stopPropagation="true"
                     @onpointerup="OnTalkPointerUp"
+                    @onpointerup:preventDefault="true"
                     @onpointercancel="OnTalkPointerCancel"
-                    @onpointerleave="OnTalkPointerLeave">📞Talk</button>
+                    @onpointerleave="OnTalkPointerLeave"
+                    @onlostpointercapture="OnTalkPointerLostCapture">📞Talk</button>
 
             <button class="toggle-btn"
                     @onclick="TogglePhone">
@@ -77,6 +81,19 @@
     </div>
 
 </div>
+
+<script>
+  window.flipPhone = window.flipPhone || {};
+  window.flipPhone.autoScrollIfOverflow = function (el) {
+    try {
+      if (!el) return;
+      if ((el.scrollHeight - el.clientHeight) > 1) {
+        el.scrollTop = el.scrollHeight;
+      }
+    } catch (e) {
+    }
+  };
+</script>
 
 <style>
 
@@ -257,6 +274,7 @@
 @code {
 
     [Inject] private LobbyChatService LobbyChatSvc { get; set; } = default!;
+    [Inject] private IJSRuntime JS { get; set; } = default!;
 
     [Parameter] public int? CurrentUserId { get; set; }
     [Parameter] public string? CurrentUserName { get; set; }
@@ -315,10 +333,23 @@
     };
 
     private bool _talkPressed;
+    private long? _activeTalkPointerId;
     private string _talkEventLabel = "PTT: up";
+    private ElementReference _displayRef;
     private string? _pendingKey;
     private int _pendingIndex;
     private CancellationTokenSource? _pendingCts;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("flipPhone.autoScrollIfOverflow", _displayRef);
+        }
+        catch
+        {
+        }
+    }
 
     protected override void OnInitialized()
     {
@@ -543,47 +574,54 @@
         _ = direction;
     }
 
-    private async Task OnTalkPointerDown()
+    private async Task OnTalkPointerDown(PointerEventArgs e)
     {
         if (_talkPressed) return;
         _talkPressed = true;
+        _activeTalkPointerId = e.PointerId;
         _talkEventLabel = "PTT: down";
         await TalkPressed.InvokeAsync();
     }
 
-    private async Task OnTalkPointerUp()
+    private async Task OnTalkPointerUp(PointerEventArgs e)
     {
-        if (!_talkPressed) return;
-        _talkPressed = false;
-        _talkEventLabel = "PTT: up";
-        await TalkReleased.InvokeAsync();
+        await ReleaseTalkAsync("PTT: up", e.PointerId);
     }
 
-    private async Task OnTalkPointerCancel()
+    private async Task OnTalkPointerCancel(PointerEventArgs e)
     {
-        _talkPressed = false;
-        _talkEventLabel = "PTT: cancel";
-        await TalkReleased.InvokeAsync();
+        await ReleaseTalkAsync("PTT: cancel", e.PointerId, force: true);
     }
 
-    private async Task OnTalkPointerLeave()
+    private async Task OnTalkPointerLeave(PointerEventArgs e)
     {
-        if (!_talkPressed) return;
-        _talkPressed = false;
-        _talkEventLabel = "PTT: leave";
-        await TalkReleased.InvokeAsync();
+        await ReleaseTalkAsync("PTT: leave", e.PointerId);
+    }
+
+    private async Task OnTalkPointerLostCapture(PointerEventArgs e)
+    {
+        await ReleaseTalkAsync("PTT: lost", e.PointerId, force: true);
     }
 
     private async Task OnTalkEndClick()
     {
-        _talkPressed = false;
-        _talkEventLabel = "PTT: up";
-        await TalkReleased.InvokeAsync();
+        await ReleaseTalkAsync("PTT: up", force: true);
 
         // Red key clears only the current draft being entered.
         _composeText = "";
         _isComposing = false;
         CancelPending();
+    }
+
+    private async Task ReleaseTalkAsync(string label, long? pointerId = null, bool force = false)
+    {
+        if (!_talkPressed) return;
+        if (!force && pointerId.HasValue && _activeTalkPointerId.HasValue && _activeTalkPointerId.Value != pointerId.Value) return;
+
+        _talkPressed = false;
+        _activeTalkPointerId = null;
+        _talkEventLabel = label;
+        await TalkReleased.InvokeAsync();
     }
 
     private void NavigateUp() => Navigate("Up");

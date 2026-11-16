@@ -57,9 +57,12 @@
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px;">
             <button type="button" class="walkie-voice-button" disabled="@(!CanPressToTalk)"
                     @onpointerdown="OnTalkPointerDown"
+                    @onpointerdown:preventDefault="true"
                     @onpointerup="OnTalkPointerUp"
+                    @onpointerup:preventDefault="true"
                     @onpointercancel="OnTalkPointerCancel"
                     @onpointerleave="OnTalkPointerLeave"
+                    @onlostpointercapture="OnTalkPointerLostCapture"
                     style="touch-action:none;user-select:none;-webkit-user-select:none;min-width:110px;padding:10px 14px;">
                 @if (IsVoiceMuted)
                 {
@@ -157,6 +160,7 @@
     private string _ttsStatus = "";
     private int _ttsStatusVersion;
     private bool _pttHeld;
+    private long? _activeTalkPointerId;
     private bool _isPhoneClient;
     private int _voiceSpeakCursor;
     private bool _voiceSpeakCursorSet;
@@ -620,12 +624,12 @@
 
     public Task StartTalkFromPhoneAsync()
     {
-        return OnTalkPointerDown();
+        return StartTalkAsync();
     }
 
     public Task StopTalkFromPhoneAsync()
     {
-        return OnTalkPointerUp();
+        return StopTalkAsync();
     }
 
     public Task ClearMyChatFromPhoneAsync()
@@ -635,7 +639,13 @@
 
     // ---------------- Walkie-talkie voice (speech-to-text -> chat -> TTS) ----------------
 
-    private async Task OnTalkPointerDown()
+    private async Task OnTalkPointerDown(PointerEventArgs e)
+    {
+        _activeTalkPointerId = e.PointerId;
+        await StartTalkAsync();
+    }
+
+    private async Task StartTalkAsync()
     {
         if (!_voiceSupported) return;
         if (!_talkEnabled) return;
@@ -673,10 +683,17 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task OnTalkPointerUp()
+    private async Task OnTalkPointerUp(PointerEventArgs e)
+    {
+        if (_activeTalkPointerId.HasValue && _activeTalkPointerId.Value != e.PointerId) return;
+        await StopTalkAsync();
+    }
+
+    private async Task StopTalkAsync()
     {
         if (!_pttHeld) return;
         _pttHeld = false;
+        _activeTalkPointerId = null;
 
         _voiceHoldRenewTimer?.Dispose();
         _voiceHoldRenewTimer = null;
@@ -698,14 +715,22 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private async Task OnTalkPointerCancel()
+    private async Task OnTalkPointerCancel(PointerEventArgs e)
     {
-        await OnTalkPointerUp();
+        if (_activeTalkPointerId.HasValue && _activeTalkPointerId.Value != e.PointerId) return;
+        await StopTalkAsync();
     }
 
-    private async Task OnTalkPointerLeave()
+    private async Task OnTalkPointerLeave(PointerEventArgs e)
     {
-        await OnTalkPointerUp();
+        if (_activeTalkPointerId.HasValue && _activeTalkPointerId.Value != e.PointerId) return;
+        await StopTalkAsync();
+    }
+
+    private async Task OnTalkPointerLostCapture(PointerEventArgs e)
+    {
+        if (_activeTalkPointerId.HasValue && _activeTalkPointerId.Value != e.PointerId) return;
+        await StopTalkAsync();
     }
 
     [JSInvokable]
