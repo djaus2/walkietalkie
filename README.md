@@ -109,9 +109,9 @@ Digit keys insert literal digits directly (no letter cycling).
 
 | Button | Behavior |
 | --- | --- |
-| Green (📞) | Push-to-talk press/release events |
-| Blue (Open/Close) | Closes phone modal when hosted in Player |
-| Red (📴) | Releases talk and clears the current unsent compose text |
+| Green (📞) | Push-and-hold-to-talk press/release events |
+| Blue (Open/Close) | Closes phone modal when hosted in Player. Return to setup. |
+| Red (📴) | Clears the current unsent compose text |
 
 ### D-Pad
 
