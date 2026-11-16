@@ -44,7 +44,7 @@ activity logs.
 
 # The FlipPhone
 
-> Now Custom Domain users can use a flip phone keypad to send chat messages and talk.  
+> Now users can use a flip phone keypad to send chat messages and talk.  
 [https://walkietalkie.sportronics.com.au](https://walkietalkie.sportronics.com.au/)  
 *To Do: Add Ring*
 
