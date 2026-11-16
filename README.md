@@ -125,7 +125,7 @@ When the FlipPhone is focused, laptop keyboard input is supported:
 - `A-Z`, `a-z`, `0-9`: appends directly to the compose text
 - `Space`: appends a space
 - `Backspace`: deletes the last compose character
-- `Enter`: sends chat (same behavior as `OK`)
+- `Send`: sends chat (same behavior as `OK`)
 
 ### Group Mechanics
 
