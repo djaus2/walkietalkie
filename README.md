@@ -28,6 +28,7 @@ functionality remains.
 - **Mute**: mutes voice playback/talk for everyone until the muter unmutes.
 - **Voice selection**: desktop users can pick a TTS voice on the Player page.
   Phone clients use the default voice.
+  See [docs/voices.md](docs/voices.md) for which voice each browser actually hears.
 
 ## Admin
 
