@@ -30,7 +30,7 @@
     }
     else if (_userGroups?.Any() == true || _isAdmin)
     {
-        <textarea @ref="_chatInRef" rows="6" style="width:100%;resize:none;" readonly>@_chatInText</textarea>
+        <textarea @ref="_chatInRef" rows="6" style="width:100%;resize:none;" readonly>@ChatBoxText</textarea>
         <div class="rainbow-heading" style="margin:0;font-weight:800;letter-spacing:0.5px;font-size:18px;line-height:1.1;display:flex;align-items:center;gap:10px;">
             <span>@(_broadcastMode ? "Broadcast to All" : "Send")</span>
             @if (_broadcastMode && _isAdmin)
@@ -111,6 +111,7 @@
     private ElementReference _chatOutRef;
 
     private string _chatInText = "";
+    private string ChatBoxText => string.IsNullOrWhiteSpace(_currentUserName) ? _chatInText : $"Logged in as {_currentUserName}\n{_chatInText}";
     private string _chatOutText = "";
     private int _lastChatCount;
     private bool _scrollPending;

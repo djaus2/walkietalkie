@@ -289,7 +289,9 @@
     private bool _isComposing;
     private string _composeText = "";
     private string _lobbyChatText = "Lobby Chat";
-    private string DisplayScreenText => _isComposing ? _composeText : _lobbyChatText;
+    private string DisplayScreenText => _isComposing
+        ? _composeText
+        : string.IsNullOrWhiteSpace(CurrentUserName) ? _lobbyChatText : $"Logged in as {CurrentUserName}\n{_lobbyChatText}";
 
     private sealed record KeyDef(string Digit, string Letters);
 
