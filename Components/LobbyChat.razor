@@ -328,6 +328,63 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    // Voice this browser uses for a voice chosen elsewhere, keyed by VoiceChoiceNote.CacheKey.
+    private readonly Dictionary<string, string> _localVoiceLabels = new();
+
+    private string BuildChatText(IReadOnlyList<ChatMessage> msgs)
+    {
+        var hideVoice = _hideVoiceInChat;
+        return string.Join("\n", msgs
+            .Where(m => !hideVoice || !m.Text.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase))
+            .Select(FormatChatLine));
+    }
+
+    private string FormatChatLine(ChatMessage m)
+    {
+        if (!VoiceChoiceNote.TryParse(m.Text, out var choice))
+            return $"{m.SenderName}: {m.Text}";
+
+        var line = $"{m.SenderName} chose voice: {VoiceChoiceNote.Describe(choice)}";
+        if (m.SenderUserId == _currentUserId) return line;
+
+        var cacheKey = VoiceChoiceNote.CacheKey(choice);
+        if (!_localVoiceLabels.TryGetValue(cacheKey, out var here))
+        {
+            here = "checking…";
+            _localVoiceLabels[cacheKey] = here;
+            _ = ResolveLocalVoiceLabelAsync(cacheKey, choice);
+        }
+        return $"{line}; here: {here}";
+    }
+
+    private async Task ResolveLocalVoiceLabelAsync(string cacheKey, VoiceChoiceNote.Choice choice)
+    {
+        string label;
+        try
+        {
+            if (_isPhoneClient)
+            {
+                label = "Default voice (phone)";
+            }
+            else
+            {
+                label = await VoiceChoiceNote.ResolveLocalAsync(JS, choice);
+            }
+        }
+        catch
+        {
+            label = "unknown";
+        }
+
+        await InvokeAsync(() =>
+        {
+            _localVoiceLabels[cacheKey] = label;
+            _chatInText = BuildChatText(_visibleMessages);
+            _scrollPending = true;
+            StateHasChanged();
+        });
+    }
+
     private void RefreshChat()
     {
         var userGroupIds = _userGroups?.Select(g => g.Id) ?? Enumerable.Empty<int>();
@@ -339,10 +396,7 @@
             var priorCount = _lastChatCount;
             _lastChatCount = count;
 
-            var hideVoice = _hideVoiceInChat;
-            _chatInText = string.Join("\n", msgs
-                .Where(m => !hideVoice || !m.Text.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase))
-                .Select(m => $"{m.SenderName}: {m.Text}"));
+            _chatInText = BuildChatText(msgs);
             _scrollPending = true;
 
             // If the visible list shrank (chat cleared/trimmed), resync the speak cursor.

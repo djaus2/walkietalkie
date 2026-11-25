@@ -376,8 +376,51 @@
         var groupIds = UserGroupIds?.Distinct().ToArray();
         var messages = LobbyChatSvc.GetMessages(CurrentUserId, groupIds);
         _lobbyChatText = messages.Any()
-            ? string.Join('\n', messages.Select(m => $"{m.SenderName}: {m.Text}"))
+            ? string.Join('\n', messages.Select(FormatLobbyChatLine))
             : "Lobby Chat";
+    }
+
+    // Voice this browser uses for a voice chosen elsewhere, keyed by VoiceChoiceNote.CacheKey.
+    private readonly Dictionary<string, string> _localVoiceLabels = new();
+
+    private string FormatLobbyChatLine(ChatMessage m)
+    {
+        if (!WalkieTalkie.Services.VoiceChoiceNote.TryParse(m.Text, out var choice))
+            return $"{m.SenderName}: {m.Text}";
+
+        var line = $"{m.SenderName} chose voice: {WalkieTalkie.Services.VoiceChoiceNote.Describe(choice)}";
+        if (m.SenderUserId == CurrentUserId) return line;
+
+        var cacheKey = WalkieTalkie.Services.VoiceChoiceNote.CacheKey(choice);
+        if (!_localVoiceLabels.TryGetValue(cacheKey, out var here))
+        {
+            here = "checking…";
+            _localVoiceLabels[cacheKey] = here;
+            _ = ResolveLocalVoiceLabelAsync(cacheKey, choice);
+        }
+        return $"{line}; here: {here}";
+    }
+
+    private async Task ResolveLocalVoiceLabelAsync(string cacheKey, WalkieTalkie.Services.VoiceChoiceNote.Choice choice)
+    {
+        string label;
+        try
+        {
+            label = await JS.InvokeAsync<bool>("GameVoice.isProbablyPhone")
+                ? "Default voice (phone)"
+                : await WalkieTalkie.Services.VoiceChoiceNote.ResolveLocalAsync(JS, choice);
+        }
+        catch
+        {
+            label = "unknown";
+        }
+
+        await InvokeAsync(() =>
+        {
+            _localVoiceLabels[cacheKey] = label;
+            RefreshLobbyChatText();
+            StateHasChanged();
+        });
     }
 
     private void PressKey(string key)
