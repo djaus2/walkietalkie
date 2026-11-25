@@ -344,7 +344,7 @@
         {
             try
             {
-                await JS.InvokeAsync<bool>("WalkieTalkieVoice.warmupVoices");
+                await JS.InvokeAsync<bool>("GameVoice.warmupVoices");
             }
             catch
             {
@@ -356,7 +356,7 @@
             try
             {
                 using var diagCts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
-                diagnostics = await JS.InvokeAsync<VoiceDiagnostics>("WalkieTalkieVoice.getVoiceDiagnostics", diagCts.Token);
+                diagnostics = await JS.InvokeAsync<VoiceDiagnostics>("GameVoice.getVoiceDiagnostics", diagCts.Token);
             }
             catch
             {
@@ -365,20 +365,20 @@
             try
             {
                 using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(16));
-                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("WalkieTalkieVoice.getVoicesAsync", cts.Token);
+                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("GameVoice.getVoicesAsync", cts.Token);
             }
             catch (OperationCanceledException)
             {
                 try
                 {
-                    await JS.InvokeAsync<bool>("WalkieTalkieVoice.refreshVoices");
+                    await JS.InvokeAsync<bool>("GameVoice.refreshVoices");
                 }
                 catch
                 {
                 }
 
                 using var retryCts = new CancellationTokenSource(TimeSpan.FromSeconds(16));
-                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("WalkieTalkieVoice.getVoicesAsync", retryCts.Token);
+                raw = await JS.InvokeAsync<List<JsVoiceInfo>>("GameVoice.getVoicesAsync", retryCts.Token);
             }
 
             _adminHasSpeechSynthesis = diagnostics?.hasSpeechSynthesis ?? false;

@@ -1,9 +1,10 @@
 using WalkieTalkie.Data;
+using GameVoice;
 using Microsoft.EntityFrameworkCore;
 
 namespace WalkieTalkie.Services;
 
-public sealed class UsableMsVoiceService
+public sealed class UsableMsVoiceService : IVoiceCatalog
 {
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly object _lock = new();
@@ -42,6 +43,11 @@ public sealed class UsableMsVoiceService
                 .ToList();
         }
     }
+
+    IReadOnlyList<VoiceCatalogEntry> IVoiceCatalog.GetVoices(string browserFamily)
+        => GetVoices(browserFamily)
+            .Select(x => new VoiceCatalogEntry(x.BrowserFamily, x.Token, x.VoiceName, x.VoiceLang, x.VoiceUri, x.UpdatedUtc))
+            .ToList();
 
     public IReadOnlyCollection<string> GetTokens(string browserFamily)
     {

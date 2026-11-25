@@ -15,6 +15,8 @@ functionality remains.
 
 > Latest: Added FlipPhone UI.
 
+> **Chat and voice:** lobby text chat, speech recognition, TTS and the per-group voice floor and mute come from the shared [GameVoice](https://github.com/djaus2/GameVoice) package on [nuget.org](https://www.nuget.org/packages/GameVoice). `WalkieTalkie.csproj` references `Version="*"`, so each restore picks up the newest stable version (on an existing checkout run `dotnet restore --force-evaluate` to refresh it).
+
 ## How it works
 
 - **Text chat**: type a message in Lobby Chat and press Enter. Messages go to
@@ -36,7 +38,7 @@ activity logs.
 ## Tech
 
 - Blazor Server (.NET 10), SQLite + EF Core for users/groups/settings/logs
-- In-memory lobby chat + voice floor services
+- In-memory lobby chat + voice floor services (GameVoice `LobbyChatService` and `VoiceRoomSet<int>`, one voice room per group)
 - Web Speech API (`SpeechRecognition` + `speechSynthesis`) in
   `wwwroot/js/walkieTalkie.js`
 

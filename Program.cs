@@ -1,3 +1,4 @@
+using GameVoice;
 using WalkieTalkie.Components;
 using WalkieTalkie.Data;
 using WalkieTalkie.Services;
@@ -77,10 +78,12 @@ namespace WalkieTalkie
             builder.Services.AddAuthorization();
 
             // Register the chat and voice lobby services so all components share the same state.
-            builder.Services.AddSingleton<LobbyChatService>();
-            builder.Services.AddSingleton<VoiceLobbyService>();
+            // Lobby chat and the per-group voice floor/mute come from the GameVoice package.
+            builder.Services.AddGameChat();
+            builder.Services.AddSingleton<VoiceRoomSet<int>>();
             builder.Services.AddSingleton<SettingsService>();
             builder.Services.AddSingleton<UsableMsVoiceService>();
+            builder.Services.AddSingleton<IVoiceCatalog>(sp => sp.GetRequiredService<UsableMsVoiceService>());
             builder.Services.AddSingleton<AppLogService>();
 
             var app = builder.Build();

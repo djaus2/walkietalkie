@@ -4,7 +4,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @using Microsoft.AspNetCore.Components
 @inject LobbyChatService LobbyChatSvc
-@inject VoiceLobbyService VoiceLobby
+@inject VoiceRoomSet<int> VoiceLobby
 @inject IHttpContextAccessor HttpContextAccessor
 @inject Microsoft.JSInterop.IJSRuntime JS
 @inject AuthService Auth
@@ -103,34 +103,6 @@
     }
 </div>
 
-<script>
-  window.lobbyChat = window.lobbyChat || {};
-  window.lobbyChat.scrollToBottom = function (el) {
-    try {
-      if (!el) return;
-      el.scrollTop = el.scrollHeight;
-    } catch (e) {
-    }
-  };
-
-  window.lobbyChat.wireEnterToSend = function (el, dotNetRef) {
-    try {
-      if (!el || !dotNetRef) return;
-      if (el.__lobbyEnterWired) return;
-      el.__lobbyEnterWired = true;
-      el.addEventListener('keydown', function (ev) {
-        try {
-          if (ev.key === 'Enter') {
-            ev.preventDefault();
-            dotNetRef.invokeMethodAsync('OnChatEnterFromJs');
-          }
-        } catch (e) {
-        }
-      });
-    } catch (e) {
-    }
-  };
-</script>
 
 @code {
     private const string VoicePrefix = "[VOICE] ";
@@ -149,7 +121,7 @@
     private bool _isAdmin;
     private bool _broadcastMode;
     private bool _dataLoaded = false;
-    private IReadOnlyList<LobbyChatService.ChatMessage> _visibleMessages = new List<LobbyChatService.ChatMessage>();
+    private IReadOnlyList<ChatMessage> _visibleMessages = new List<ChatMessage>();
 
     // Voice (walkie-talkie) state
     private bool _talkEnabled;
@@ -283,7 +255,7 @@
         {
             if (_pttHeld && _currentUserId.HasValue && _currentUserId.Value > 0)
             {
-                VoiceLobby.ReleaseAllVoiceFloors(_currentUserId.Value);
+                VoiceLobby.ReleaseAllFloors(_currentUserId.Value);
             }
         }
         catch
@@ -396,7 +368,7 @@
             try
             {
                 _dotNetRef ??= DotNetObjectReference.Create(this);
-                await JS.InvokeVoidAsync("lobbyChat.wireEnterToSend", _chatOutRef, _dotNetRef);
+                await JS.InvokeVoidAsync("GameChat.wireEnterToSend", _chatOutRef, _dotNetRef);
             }
             catch
             {
@@ -404,14 +376,14 @@
 
             try
             {
-                await JS.InvokeAsync<bool>("WalkieTalkieVoice.installTtsUnlocker");
-                _voiceSupported = await JS.InvokeAsync<bool>("WalkieTalkieVoice.isSupported");
+                await JS.InvokeAsync<bool>("GameVoice.installTtsUnlocker");
+                _voiceSupported = await JS.InvokeAsync<bool>("GameVoice.isSupported");
                 _voiceSupportChecked = true;
                 _talkEnabled = _voiceSupported;
 
                 try
                 {
-                    _isPhoneClient = await JS.InvokeAsync<bool>("WalkieTalkieVoice.isProbablyPhone");
+                    _isPhoneClient = await JS.InvokeAsync<bool>("GameVoice.isProbablyPhone");
                 }
                 catch
                 {
@@ -434,7 +406,7 @@
             _scrollPending = false;
             try
             {
-                await JS.InvokeVoidAsync("lobbyChat.scrollToBottom", _chatInRef);
+                await JS.InvokeVoidAsync("GameChat.scrollToBottom", _chatInRef);
             }
             catch
             {
@@ -501,7 +473,7 @@
     private void ToggleMute()
     {
         if (!_currentUserId.HasValue) return;
-        var (ok, msg) = VoiceLobby.ToggleVoiceMute(_currentUserId.Value, _currentUserName, MyGroupIds);
+        var (ok, msg) = VoiceLobby.ToggleMute(_currentUserId.Value, _currentUserName, MyGroupIds);
         if (!ok && !string.IsNullOrWhiteSpace(msg))
         {
             _voiceStatus = msg;
@@ -659,14 +631,14 @@
 
         if (_currentUserId.HasValue && _currentUserId.Value > 0)
         {
-            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
+            VoiceLobby.TryAcquireFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
         }
 
         _voiceDotNetRef ??= DotNetObjectReference.Create(this);
 
         try
         {
-            await JS.InvokeAsync<bool>("WalkieTalkieVoice.start", _voiceDotNetRef);
+            await JS.InvokeAsync<bool>("GameVoice.start", _voiceDotNetRef);
         }
         catch
         {
@@ -677,7 +649,7 @@
         {
             if (!_pttHeld) return;
             if (!_currentUserId.HasValue || _currentUserId.Value <= 0) return;
-            VoiceLobby.TryAcquireVoiceFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
+            VoiceLobby.TryAcquireFloor(_currentUserId.Value, _currentUserName, MyGroupIds);
         }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
 
         await InvokeAsync(StateHasChanged);
@@ -700,12 +672,12 @@
 
         if (_currentUserId.HasValue && _currentUserId.Value > 0)
         {
-            VoiceLobby.ReleaseAllVoiceFloors(_currentUserId.Value);
+            VoiceLobby.ReleaseAllFloors(_currentUserId.Value);
         }
 
         try
         {
-            await JS.InvokeAsync<bool>("WalkieTalkieVoice.stop");
+            await JS.InvokeAsync<bool>("GameVoice.stop");
         }
         catch
         {
@@ -789,7 +761,7 @@
         {
             try
             {
-                await JS.InvokeAsync<bool>("WalkieTalkieVoice.unlockTts");
+                await JS.InvokeAsync<bool>("GameVoice.unlockTts");
             }
             catch
             {
@@ -803,7 +775,7 @@
 
                 var t = m.Text ?? string.Empty;
                 if (!t.StartsWith(VoicePrefix, StringComparison.OrdinalIgnoreCase)) continue;
-                if (VoiceLobby.IsGroupMuted(m.GroupId)) continue; // per-group mute
+                if (m.GroupId is int mutedGroupId && VoiceLobby.IsRoomMuted(mutedGroupId)) continue; // per-group mute
 
                 var payload = t.Substring(VoicePrefix.Length).Trim();
                 if (string.IsNullOrWhiteSpace(payload)) continue;
@@ -840,8 +812,8 @@
                 try
                 {
                     var voiceLabel = _isPhoneClient
-                        ? await JS.InvokeAsync<string>("WalkieTalkieVoice.speakDefaultAndDescribe", payload)
-                        : await JS.InvokeAsync<string>("WalkieTalkieVoice.speakAndDescribe", payload, voiceKey, voiceLanguage, voiceRegion);
+                        ? await JS.InvokeAsync<string>("GameVoice.speakDefaultAndDescribe", payload)
+                        : await JS.InvokeAsync<string>("GameVoice.speakAndDescribe", payload, voiceKey, voiceLanguage, voiceRegion);
                     if (string.IsNullOrWhiteSpace(voiceLabel)) voiceLabel = "Default voice";
 
                     var usedDefaultVoice = voiceLabel.StartsWith("Default voice", StringComparison.OrdinalIgnoreCase);
@@ -870,8 +842,8 @@
                 catch
                 {
                     var ok = _isPhoneClient
-                        ? await JS.InvokeAsync<bool>("WalkieTalkieVoice.speakDefault", payload)
-                        : await JS.InvokeAsync<bool>("WalkieTalkieVoice.speak", payload, voiceKey, voiceLanguage, voiceRegion);
+                        ? await JS.InvokeAsync<bool>("GameVoice.speakDefault", payload)
+                        : await JS.InvokeAsync<bool>("GameVoice.speak", payload, voiceKey, voiceLanguage, voiceRegion);
                     _ = ok;
                 }
 

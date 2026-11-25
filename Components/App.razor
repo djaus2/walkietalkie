@@ -15,7 +15,8 @@
 <body>
     <Routes @rendermode="@(new InteractiveServerRenderMode(prerender: false))" />
     <ReconnectModal />
-    <script src="js/walkieTalkie.js"></script>
+    <script src="_content/GameVoice/gameVoice.js"></script>
+    <script src="_content/GameVoice/gameChat.js"></script>
     <script>
         window.WalkieTalkieAuth = window.WalkieTalkieAuth || {
             getContextId: function () {
