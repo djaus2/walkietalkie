@@ -8,6 +8,7 @@
 @inject IHttpContextAccessor HttpContextAccessor
 @inject Microsoft.JSInterop.IJSRuntime JS
 @inject AuthService Auth
+@inject SettingsService AppSettingsSvc
 @inject NavigationManager Nav
 
 <div style="margin-top:18px;max-width:520px;">
@@ -693,7 +694,8 @@
 
         try
         {
-            await JS.InvokeAsync<bool>("GameVoice.start", _voiceDotNetRef);
+            var recognitionLanguage = await AppSettingsSvc.GetSpeechRecognitionLanguageAsync();
+            await JS.InvokeAsync<bool>("GameVoice.start", _voiceDotNetRef, recognitionLanguage);
         }
         catch
         {
