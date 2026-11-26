@@ -136,6 +136,11 @@ public static class DbSeeder
             await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Users\" ADD COLUMN \"IsLoggedIn\" INTEGER NOT NULL DEFAULT 0");
         }
 
+        if (!await ColumnExistsAsync(db, "Settings", "SpeechRecognitionLanguage"))
+        {
+            await db.Database.ExecuteSqlRawAsync("ALTER TABLE \"Settings\" ADD COLUMN \"SpeechRecognitionLanguage\" TEXT NULL");
+        }
+
         if (!await TableExistsAsync(db, "LoginContexts"))
         {
             await db.Database.ExecuteSqlRawAsync(@"

@@ -63,3 +63,8 @@ Then close every Chrome window and reopen it. Edge's online voices can't be adde
 Turning speech into text happens in the **sender's** browser and needs no installed voices.
 Edge sends the audio to Microsoft's speech service and Chrome sends it to Google's.
 Only the read-aloud (TTS) side depends on the voices installed on the receiving device.
+
+Recognition uses one language for everyone, set by an Admin on the Admin page under
+**Settings → Speech recognition language** (a code such as `en-AU`, `en-US` or `fi-FI`; empty means `en-AU`).
+It's the language players speak, not a voice: any accent of that language works.
+A change applies the next time a player presses Talk.

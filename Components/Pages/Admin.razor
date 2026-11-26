@@ -101,6 +101,20 @@
             <br />
             <i><b>Note:</b> When disabled, only Admins can change PINs</i>
         </label>
+        <label style="display:flex;flex-direction:column;gap:4px">
+            Speech recognition language
+            <select @bind="_speechRecognitionLanguage">
+                @if (!SpeechRecognitionLanguages.Any(l => string.Equals(l.Code, _speechRecognitionLanguage, StringComparison.OrdinalIgnoreCase)))
+                {
+                    <option value="@_speechRecognitionLanguage">@_speechRecognitionLanguage</option>
+                }
+                @foreach (var lang in SpeechRecognitionLanguages)
+                {
+                    <option value="@lang.Code">@lang.Name (@lang.Code)</option>
+                }
+            </select>
+            <i>Language players speak when talking. Applies to everyone.</i>
+        </label>
         <button @onclick="SaveSettings">Save</button>
         @if (!string.IsNullOrWhiteSpace(_settingsMessage))
         {
@@ -242,7 +256,16 @@
 
     private int _maxLoginHrs = 4;                // Max time a login session is valid before requiring re-login
     private bool _allowPlayerPinChange = true;
+    private string _speechRecognitionLanguage = SettingsService.DefaultSpeechRecognitionLanguage;
     private string _settingsMessage = "";
+
+    private static readonly (string Code, string Name)[] SpeechRecognitionLanguages =
+    {
+        ("en-AU", "English (Australia)"), ("en-GB", "English (UK)"), ("en-NZ", "English (New Zealand)"),
+        ("en-US", "English (US)"), ("de-DE", "German"), ("es-ES", "Spanish"), ("fi-FI", "Finnish"),
+        ("fr-FR", "French"), ("it-IT", "Italian"), ("ja-JP", "Japanese"), ("nl-NL", "Dutch"),
+        ("pt-BR", "Portuguese (Brazil)"), ("zh-CN", "Chinese (Mandarin)")
+    };
     private string _voiceCatalogMessage = "";
     private bool _checkingChromeVoices;
     private List<WalkieTalkie.Data.UsableMsVoice> _chromeUsableVoices = new();
@@ -314,6 +337,7 @@
 
         _maxLoginHrs = await Settings.GetMaxLoginHrsAsync();
         _allowPlayerPinChange = await Settings.GetAllowPlayerPinChangeAsync();
+        _speechRecognitionLanguage = await Settings.GetSpeechRecognitionLanguageAsync();
         _chromeUsableVoices = UsableMsVoices.GetVoices("chrome").ToList();
         _adminSelectedVoiceTokens = _chromeUsableVoices
             .Select(x => x.Token)
@@ -332,7 +356,11 @@
         _settingsMessage = "";
         var ok1 = await Settings.UpdateMaxLoginHrsAsync(_maxLoginHrs);
         var ok2 = await Settings.UpdateAllowPlayerPinChangeAsync(_allowPlayerPinChange);
-        _settingsMessage = (ok1 && ok2) ? "Saved." : "Invalid value.";
+        var ok3 = await Settings.UpdateSpeechRecognitionLanguageAsync(_speechRecognitionLanguage);
+        if (ok3) _speechRecognitionLanguage = await Settings.GetSpeechRecognitionLanguageAsync();
+        _settingsMessage = (ok1 && ok2 && ok3)
+            ? "Saved."
+            : ok3 ? "Invalid value." : "Invalid speech recognition language: use a code like en-AU.";
     }
 
     private async Task LoadAdminVoicesFromUserGesture()
